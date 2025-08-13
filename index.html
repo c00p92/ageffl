@@ -1,0 +1,915 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Sleeper League Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1115; --surface: #171925; --surface-2: #1e2130;
+    --text: #e6e7ee; --muted: #a6abc8; --border: #2a2f45;
+    --accent: #7b6ff7; --accent-2: #22c1ee; --good: #36d399; --warn: #f6c859; --bad: #ef6b73;
+    --radius: 14px; --shadow: 0 10px 30px rgba(0,0,0,0.35);
+  }
+  html, body { height:100%; background:var(--bg); color:var(--text); }
+  body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+  header {
+    display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end; margin-bottom: 18px;
+    padding:16px; border:1px solid var(--border); border-radius: var(--radius);
+    background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%); box-shadow: var(--shadow);
+  }
+  nav.tabs { display:flex; gap:8px; margin: 10px 0 0; flex-wrap: wrap; }
+  .tabbtn {
+    height:36px; padding:0 12px; border-radius:10px; border:1px solid var(--border);
+    background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface) 100%);
+    color: var(--text); cursor:pointer;
+  }
+  .tabbtn.active { background: linear-gradient(180deg, var(--accent) 0%, #5c52d8 100%); border:none; color:white; box-shadow: 0 6px 18px rgba(123,111,247,0.35) }
+  label { font-size:12px; color:var(--muted); }
+  input, button { height:40px; border-radius:12px; border:1px solid var(--border); background:#0d0f16; color:var(--text); padding:0 12px; outline:none; }
+  input[type=number] { width: 96px; text-align:center; }
+  button.primary { background: linear-gradient(180deg, var(--accent) 0%, #5c52d8 100%); border: none; color:white; font-weight:600; cursor:pointer; padding:0 14px; box-shadow: 0 6px 18px rgba(123,111,247,0.35); }
+  button.secondary { background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface) 100%); border:1px solid var(--border); color: var(--text); }
+  button:hover { filter: brightness(1.05); }
+  .bar { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+  .note { margin-left:auto; display:flex; align-items:center; gap:8px; color:var(--muted); }
+  .dot { width:8px; height:8px; border-radius:50%; background: var(--accent-2); opacity:.85; }
+  .view { display:none; } .view.active { display:block; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(360px,1fr)); gap:20px; }
+  section {
+    border:1px solid var(--border); border-radius: var(--radius); padding:16px;
+    background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%); box-shadow: var(--shadow); min-width:320px;
+  }
+  h2 { margin:0 0 12px; font-size:18px; letter-spacing: .2px; }
+  .muted { color: var(--muted); font-size:12px; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:600; background:#111528; border:1px solid var(--border); color:var(--muted); }
+  table { width:100%; border-collapse: collapse; font-size:13px; }
+  th, td { border-bottom:1px solid var(--border); padding:10px 8px; text-align:left; }
+  th { background: #14172a; color:#cfd2f0; position:sticky; top:0; z-index:1; }
+  tr:hover td { background:#151a2f66; }
+  .cards { display:grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap:14px; }
+  .card {
+    border:1px solid var(--border); border-radius:12px; padding:14px;
+    background: linear-gradient(180deg, #171a28 0%, #121624 100%);
+  }
+  .card h3 { margin:0 0 6px; font-size:16px; }
+  .card .kv { font-size:13px; color:var(--muted); display:flex; justify-content:space-between; margin:2px 0; }
+  .link { color: var(--accent-2); text-decoration: underline; cursor: pointer; }
+  canvas { max-height: 360px; }
+  /* Previews */
+  .preview-card { display:flex; flex-direction:column; gap:10px; }
+  .preview-meta { display:flex; gap:8px; flex-wrap:wrap; color:var(--muted); font-size:12px; }
+  textarea.preview {
+    width:100%; min-height:140px; resize:vertical; border-radius:12px; border:1px solid var(--border); background:#0d0f16; color:var(--text); padding:10px 12px; line-height:1.35;
+  }
+  .btnrow { display:flex; gap:8px; flex-wrap:wrap; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<header>
+  <div class="bar" style="flex:1 1 auto; gap:16px;">
+    <div>
+      <label for="week">Week</label><br/>
+      <input id="week" type="number" min="1" max="18" value="1">
+    </div>
+    <div style="display:flex; gap:10px;">
+      <button id="autoWeekBtn" class="secondary" title="Detect current NFL week">Auto Week</button>
+      <button id="loadBtn" class="primary">Load Current Season</button>
+      <button id="matchupsBtn" class="secondary">Load Matchups</button>
+    </div>
+    <div id="seasonNote" class="note"><span class="dot"></span><span>Ready</span></div>
+  </div>
+
+  <nav class="tabs" style="width:100%;">
+    <button class="tabbtn active" data-tab="dashboard">Dashboard</button>
+    <button class="tabbtn" data-tab="previews">Previews</button>
+    <button class="tabbtn" data-tab="alltime">All-Time</button>
+    <button class="tabbtn" data-tab="seasons">Seasons</button>
+    <button class="tabbtn" data-tab="seasonDetail">Season Detail</button>
+  </nav>
+</header>
+
+<!-- DASHBOARD -->
+<div id="dashboard" class="view active">
+  <div class="grid">
+    <section>
+      <h2>League Info</h2>
+      <div id="leagueInfo" class="muted">—</div>
+    </section>
+
+    <section>
+      <h2>Power Rankings <span class="pill">PF-weighted</span></h2>
+      <div id="powerWrap"></div>
+      <div class="muted" style="margin-top:6px;">Weights: PF 55% • Wins 25% • MOV 10% • Recent 10%</div>
+    </section>
+
+    <section>
+      <h2>Standings <span class="pill">Wins → PF</span></h2>
+      <div id="standingsWrap"></div>
+    </section>
+
+    <section>
+      <h2>Rosters</h2>
+      <div id="rostersWrap"></div>
+    </section>
+
+    <section>
+      <h2>Matchups (selected week)</h2>
+      <div id="matchupsWrap" class="muted">Enter a week and click “Load Matchups”.</div>
+    </section>
+
+    <section>
+      <h2>Chart: PF vs PA (Scatter)</h2>
+      <canvas id="scatterPFPA"></canvas>
+    </section>
+
+    <section>
+      <h2>Chart: Total PF by Team</h2>
+      <canvas id="barPF"></canvas>
+    </section>
+
+    <section>
+      <h2>Chart: Week Scores</h2>
+      <canvas id="barWeek"></canvas>
+    </section>
+  </div>
+</div>
+
+<!-- PREVIEWS -->
+<div id="previews" class="view">
+  <section>
+    <h2>Matchup Previews</h2>
+    <div class="muted" style="margin-bottom:8px;">
+      Select a week (top left) → “Load Matchups.” Edit or auto-generate previews and click Save. Stored locally. Export/Import to share.
+    </div>
+    <div class="btnrow" style="margin-bottom:10px;">
+      <button id="genAllBtn" class="secondary">Generate All (Local AI)</button>
+      <button id="exportBtn" class="secondary">Export JSON</button>
+      <input id="importFile" type="file" accept="application/json" style="display:none;">
+      <button id="importBtn" class="secondary">Import JSON</button>
+    </div>
+    <div id="previewsWrap" class="cards"></div>
+  </section>
+</div>
+
+<!-- ALL-TIME -->
+<div id="alltime" class="view">
+  <section>
+    <h2>All-Time Power Rankings</h2>
+    <div class="muted" style="margin-bottom:6px;">Seasons: 2025, 2024, 2023, 2022 • Weights: Titles 25%, Total PF 25%, Total Wins 25%, Win% 15%, Finals 5%, PF/G 5%</div>
+    <div class="btnrow" style="margin-bottom:10px;">
+      <button id="refreshAllTimeBtn" class="primary">Compute / Refresh</button>
+      <button id="exportAllTimeBtn" class="secondary">Export CSV</button>
+    </div>
+    <div id="allTimeWrap">—</div>
+  </section>
+</div>
+
+<!-- SEASONS (SUMMARY) -->
+<div id="seasons" class="view">
+  <section>
+    <h2>Past Seasons</h2>
+    <div class="muted" id="seasonsHint">Hardcoded: 2025, 2024, 2023, 2022.</div>
+    <div id="seasonsCards" class="cards" style="margin-top:10px;"></div>
+  </section>
+</div>
+
+<!-- SEASON DETAIL -->
+<div id="seasonDetail" class="view">
+  <section>
+    <h2 id="seasonTitle">Season Detail</h2>
+    <div id="seasonMeta" class="muted">—</div>
+  </section>
+  <section>
+    <h2>Standings</h2>
+    <div id="seasonStandings"></div>
+  </section>
+</div>
+
+<script>
+/* --- Hardcoded league IDs --- */
+const LEAGUES = {
+  2022: "783723162142658560",
+  2023: "921453343510245376",
+  2024: "1048189019835740160",
+  2025: "1220026837208399872" // current
+};
+const CURRENT_SEASON = 2025; // dashboard default
+
+const BASE = "https://api.sleeper.app/v1";
+const el = (sel) => document.querySelector(sel);
+
+const weekInput = el("#week");
+const leagueInfoDiv = el("#leagueInfo"), powerWrap = el("#powerWrap"), standingsWrap = el("#standingsWrap");
+const rostersWrap = el("#rostersWrap"), matchupsWrap = el("#matchupsWrap");
+const seasonsCards = el("#seasonsCards"), seasonsHint = el("#seasonsHint");
+const seasonTitle = el("#seasonTitle"), seasonMeta = el("#seasonMeta"), seasonStandings = el("#seasonStandings");
+const previewsWrap = el("#previewsWrap");
+const importFile = el("#importFile");
+const allTimeWrap = el("#allTimeWrap");
+
+let charts = { scatter:null, pf:null, week:null };
+let cache = { league:null, users:[], rosters:[], matchupsByWeek:{}, seasons:{} };
+
+/* ---------- Utilities ---------- */
+function themeColors() {
+  const s = getComputedStyle(document.documentElement);
+  return { text: s.getPropertyValue('--text').trim(), grid: s.getPropertyValue('--border').trim(),
+           accent: s.getPropertyValue('--accent').trim(), cyan: s.getPropertyValue('--accent-2').trim() };
+}
+function setActive(tab) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.tabbtn').forEach(b => b.classList.remove('active'));
+  el("#"+tab).classList.add('active');
+  document.querySelector(`.tabbtn[data-tab="${tab}"]`)?.classList.add('active');
+}
+document.querySelectorAll('.tabbtn').forEach(b => b.addEventListener('click', () => setActive(b.dataset.tab)));
+
+async function fetchJson(path) {
+  const url = `${BASE}${path}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+  return res.json();
+}
+
+function table(headers, rows) {
+  const th = headers.map(h => `<th>${h}</th>`).join("");
+  const tr = rows.map(r => `<tr>${r.map(c => `<td>${c ?? ""}</td>`).join("")}</tr>`).join("");
+  return `<div style="overflow:auto; max-height:60vh"><table><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table></div>`;
+}
+function destroyChart(ref) { if (ref && typeof ref.destroy === "function") ref.destroy(); }
+
+/* ---------- Charts ---------- */
+function renderPFPAChart(rosters, userMap) {
+  destroyChart(charts.scatter);
+  const c = themeColors();
+  const data = rosters.map(r => ({
+    x: r?.settings?.fpts_against ?? 0,
+    y: r?.settings?.fpts ?? 0,
+    label: r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`
+  }));
+  charts.scatter = new Chart(el("#scatterPFPA"), {
+    type: "scatter",
+    data: { datasets: [{ label:"PF vs PA", data, parsing:false, pointRadius:5, backgroundColor:c.accent }] },
+    options: {
+      maintainAspectRatio:false,
+      scales: {
+        x: { title:{display:true, text:"Points Against (PA)", color:c.text}, grid:{color:c.grid}, ticks:{color:c.text} },
+        y: { title:{display:true, text:"Points For (PF)", color:c.text}, grid:{color:c.grid}, ticks:{color:c.text} }
+      },
+      plugins: { legend: { labels:{ color:c.text } } }
+    }
+  });
+}
+function renderPFBar(rosters, userMap) {
+  destroyChart(charts.pf);
+  const c = themeColors();
+  const labels = rosters.map(r => r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`);
+  const pf = rosters.map(r => r?.settings?.fpts ?? 0);
+  charts.pf = new Chart(el("#barPF"), {
+    type: "bar",
+    data: { labels, datasets: [{ label:"Total PF", data: pf, backgroundColor:c.accent }] },
+    options: {
+      maintainAspectRatio:false,
+      plugins:{ legend:{ labels:{ color:c.text } } },
+      scales:{ x:{ ticks:{ color:c.text }, grid:{ color:c.grid } }, y:{ ticks:{ color:c.text }, grid:{ color:c.grid }, title:{display:true, text:"Points", color:c.text} } }
+    }
+  });
+}
+function renderWeekBar(rows) {
+  destroyChart(charts.week);
+  const c = themeColors();
+  const labels = rows.flatMap(r => [r[2], r[4]]);
+  const scores = rows.flatMap(r => [Number(r[3])||0, Number(r[5])||0]);
+  if (!labels.length) { charts.week = null; el("#barWeek").replaceWith(el("#barWeek").cloneNode(true)); return; }
+  charts.week = new Chart(el("#barWeek"), {
+    type: "bar",
+    data: { labels, datasets: [{ label:"Week Scores", data: scores, backgroundColor: labels.map((_,i)=> i%2===0 ? c.cyan : c.accent) }] },
+    options: {
+      maintainAspectRatio:false,
+      plugins:{ legend:{ labels:{ color:c.text } } },
+      scales:{ x:{ ticks:{ color:c.text }, grid:{ color:c.grid } }, y:{ ticks:{ color:c.text }, grid:{ color:c.grid }, title:{display:true, text:"Points", color:c.text} } }
+    }
+  });
+}
+
+/* ---------- Auto-detect current NFL week ---------- */
+async function getCurrentWeek() {
+  el("#seasonNote").lastElementChild.textContent = "Detecting current NFL week…";
+  try {
+    const state = await fetchJson("/state/nfl");
+    if (state.season_type === "regular" && Number(state.week)) {
+      weekInput.value = Number(state.week);
+      el("#seasonNote").lastElementChild.textContent = `Week ${state.week} • ${state.season}`;
+    } else {
+      weekInput.value = 1;
+      el("#seasonNote").lastElementChild.textContent = `${state.season_type || "offseason"} • defaulting to Week 1`;
+    }
+  } catch { el("#seasonNote").lastElementChild.textContent = "Couldn’t detect week (set manually)."; }
+}
+
+/* ---------- Power Rankings (current season) ---------- */
+function normalize(arr) {
+  const min = Math.min(...arr), max = Math.max(...arr);
+  if (!isFinite(min) || !isFinite(max) || min === max) return arr.map(_ => 0.5);
+  return arr.map(v => (v - min) / (max - min));
+}
+async function computePower(leagueId, rosters, recentWindow = 3, currentWeek = Number(weekInput.value || 1)) {
+  const teamIndex = new Map(); rosters.forEach((r, i) => teamIndex.set(String(r.roster_id), i));
+
+  const gamesPlayed = rosters.map(r => (r?.settings?.wins ?? 0) + (r?.settings?.losses ?? 0));
+  const wins = rosters.map(r => (r?.settings?.wins ?? 0));
+  const pf = rosters.map(r => (r?.settings?.fpts ?? 0));
+
+  const recentPFperTeam = new Array(rosters.length).fill(0);
+  const recentGames = new Array(rosters.length).fill(0);
+  const movTotals = new Array(rosters.length).fill(0);
+  const movWins = new Array(rosters.length).fill(0);
+
+  const startWeek = Math.max(1, currentWeek - recentWindow + 1);
+  for (let wk = startWeek; wk <= currentWeek; wk++) {
+    try {
+      const m = await fetchJson(`/league/${leagueId}/matchups/${wk}`);
+      const groups = {};
+      m.forEach(x => { const id = x.matchup_id ?? `solo-${x.roster_id}`; (groups[id] ||= []).push(x); });
+      Object.values(groups).forEach(([a, b]) => {
+        if (!a || !b) return; // skip byes
+        const ia = teamIndex.get(String(a.roster_id));
+        const ib = teamIndex.get(String(b.roster_id));
+        if (ia == null || ib == null) return;
+        recentPFperTeam[ia] += (a.points ?? 0);
+        recentPFperTeam[ib] += (b.points ?? 0);
+        recentGames[ia]++; recentGames[ib]++;
+        const diff = (a.points ?? 0) - (b.points ?? 0);
+        if (diff > 0) { movTotals[ia] += diff; movWins[ia]++; }
+        else if (diff < 0) { movTotals[ib] += (-diff); movWins[ib]++; }
+      });
+    } catch {}
+  }
+
+  const recentPFpg = recentPFperTeam.map((sum, i) => recentGames[i] ? (sum / recentGames[i]) : 0);
+  const movAvg = movTotals.map((sum, i) => movWins[i] ? (sum / movWins[i]) : 0);
+
+  const PF_Score = normalize(pf);
+  const Wins_Score = wins.map((w, i) => (gamesPlayed[i] ? (w / gamesPlayed[i]) : 0));
+  const MOV_Score = normalize(movAvg);
+  const Recent_Score = normalize(recentPFpg);
+
+  const weights = { PF: 0.55, W: 0.25, MOV: 0.10, RECENT: 0.10 };
+  const PowerScore = rosters.map((_, i) =>
+    weights.PF * PF_Score[i] +
+    weights.W  * Wins_Score[i] +
+    weights.MOV* MOV_Score[i] +
+    weights.RECENT * Recent_Score[i]
+  );
+
+  return { PowerScore, recentPFpg };
+}
+async function buildStandingsWithPower(leagueId, users, rosters) {
+  const { PowerScore } = await computePower(leagueId, rosters, 3, Number(weekInput.value || 1));
+  const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
+
+  const rows = rosters
+    .map((r, i) => ({
+      team: r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`,
+      wins: r?.settings?.wins ?? 0,
+      losses: r?.settings?.losses ?? 0,
+      pf: r?.settings?.fpts ?? 0,
+      pa: r?.settings?.fpts_against ?? 0,
+      pwr: PowerScore[i]
+    }))
+    .sort((a,b) => b.pwr - a.pwr)
+    .map((x, rank) => [rank + 1, x.team, x.wins, x.losses, x.pf, x.pa, (x.pwr*100).toFixed(1)]);
+
+  return table(["PWR Rank","Team","W","L","PF","PA","PowerScore"], rows);
+}
+
+/* ---------- Classic Standings (Wins → PF) ---------- */
+function buildClassicStandings(users, rosters) {
+  const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
+  const sorted = [...rosters].sort((a,b) =>
+    (b?.settings?.wins ?? 0) - (a?.settings?.wins ?? 0) ||
+    (b?.settings?.fpts ?? 0) - (a?.settings?.fpts ?? 0)
+  );
+
+  const rows = sorted.map((r, i) => {
+    const wins = r?.settings?.wins ?? 0;
+    const losses = r?.settings?.losses ?? 0;
+    const pf = r?.settings?.fpts ?? 0;
+    const pa = r?.settings?.fpts_against ?? 0;
+    const games = Math.max(1, wins + losses);
+    return [
+      i+1,
+      r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`,
+      wins, losses, pf, pa, (pf / games).toFixed(2)
+    ];
+  });
+
+  return table(["Rank","Team","W","L","PF","PA","Avg PF/G"], rows);
+}
+
+/* ---------- Current (2025) league → dashboard ---------- */
+async function loadCurrentLeague() {
+  try {
+    setActive('dashboard');
+    matchupsWrap.textContent = "—";
+    const leagueId = LEAGUES[CURRENT_SEASON];
+
+    const [league, users, rosters] = await Promise.all([
+      fetchJson(`/league/${leagueId}`),
+      fetchJson(`/league/${leagueId}/users`),
+      fetchJson(`/league/${leagueId}/rosters`)
+    ]);
+    cache = { ...cache, league, users, rosters };
+
+    const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
+
+    leagueInfoDiv.innerHTML = `
+      <div style="font-weight:700; font-size:16px;">${league.name || "(unnamed league)"} <span class="muted">(${league.season})</span></div>
+      <div class="muted">Rosters: ${league.total_rosters ?? "?"} • Scoring: ${league.scoring_settings ? "Custom" : "Standard"} • <span class="pill">ID: ${leagueId}</span></div>
+    `;
+
+    powerWrap.innerHTML = await buildStandingsWithPower(leagueId, users, rosters);
+    standingsWrap.innerHTML = buildClassicStandings(users, rosters);
+
+    const rosterRows = rosters.map(r => [
+      r.roster_id,
+      userMap[r.owner_id] || "",
+      r?.settings?.team_name || "",
+      r?.settings?.wins ?? 0,
+      r?.settings?.losses ?? 0,
+      r?.settings?.fpts ?? 0,
+      r?.settings?.fpts_against ?? 0,
+      r?.metadata?.streak || ""
+    ]);
+    rostersWrap.innerHTML = table(["Roster ID","Owner","Team Name","W","L","PF","PA","Streak"], rosterRows);
+
+    renderPFPAChart(rosters, userMap);
+    renderPFBar(rosters, userMap);
+
+    loadSeasonsSummary().catch(()=>{});
+
+  } catch (err) {
+    leagueInfoDiv.textContent = `Error: ${err.message}`;
+    powerWrap.textContent = ""; standingsWrap.textContent = ""; rostersWrap.textContent = "";
+    destroyChart(charts.scatter); destroyChart(charts.pf);
+  }
+}
+
+/* ---------- Week matchups (current season) ---------- */
+async function loadMatchups() {
+  try {
+    const leagueId = LEAGUES[CURRENT_SEASON];
+    const week = Number(weekInput.value);
+    if (!week || week < 1 || week > 18) throw new Error("Week must be 1–18.");
+
+    const [matchups, rosters, users] = await Promise.all([
+      fetchJson(`/league/${leagueId}/matchups/${week}`),
+      cache.rosters?.length ? Promise.resolve(cache.rosters) : fetchJson(`/league/${leagueId}/rosters`),
+      cache.users?.length ? Promise.resolve(cache.users) : fetchJson(`/league/${leagueId}/users`)
+    ]);
+
+    cache.matchupsByWeek[week] = matchups;
+
+    const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
+    const rosterToOwner = {}; rosters.forEach(r => rosterToOwner[r.roster_id] = (r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`));
+
+    const groups = {};
+    matchups.forEach(m => { const id = m.matchup_id ?? `solo-${m.roster_id}`; (groups[id] ||= []).push(m); });
+
+    const rows = Object.entries(groups).map(([mid, arr]) => {
+      if (arr.length === 2) {
+        const [a,b] = arr;
+        const nameA = rosterToOwner[a.roster_id], nameB = rosterToOwner[b.roster_id];
+        const scoreA = a.points ?? 0, scoreB = b.points ?? 0;
+        const winner = scoreA === scoreB ? "Tie" : (scoreA > scoreB ? nameA : nameB);
+        return [week, mid, nameA, scoreA, nameB, scoreB, winner];
+      } else {
+        const only = arr[0], name = rosterToOwner[only.roster_id];
+        return [week, mid, name, (only.points ?? 0), "(bye)", "", name];
+      }
+    }).sort((a,b)=> (b[3]+(b[5]||0)) - (a[3]+(a[5]||0)));
+
+    matchupsWrap.innerHTML = rows.length
+      ? table(["Week","Matchup ID","Team A","Score A","Team B","Score B","Winner"], rows)
+      : `<div class="muted">No matchups found for week ${week} (off-season or not scheduled).</div>`;
+
+    renderWeekBar(rows);
+    renderPreviews(week, groups, users, rosters);
+
+  } catch (err) {
+    matchupsWrap.textContent = `Error: ${err.message}`;
+    destroyChart(charts.week);
+  }
+}
+
+/* ---------- Seasons (summary + podium) ---------- */
+function teamsFromMatch(m) { return [m.t1 ?? m.team1 ?? m.roster_id_1 ?? null, m.t2 ?? m.team2 ?? m.roster_id_2 ?? null]; }
+function pointsFromMatch(m) { return [m.t1_points ?? m.p1 ?? m.points1 ?? m.score1 ?? null, m.t2_points ?? m.p2 ?? m.points2 ?? m.score2 ?? null]; }
+function winnerFromMatch(m) {
+  const wf = ['w','winner'].find(k => k in m); if (wf && m[wf] != null) return m[wf];
+  const [t1,t2] = teamsFromMatch(m), [p1,p2] = pointsFromMatch(m);
+  if (t1 != null && t2 != null && p1 != null && p2 != null) return Number(p1) === Number(p2) ? t1 : (Number(p1) > Number(p2) ? t1 : t2);
+  return null;
+}
+function podiumFromBracket(bracket) {
+  if (!Array.isArray(bracket) || bracket.length === 0) return { champion:null, runnerUp:null, third:null };
+  const rKey = ['r','round','bracket_round'].find(k => bracket.some(x => k in x)) || 'r';
+  const maxRound = Math.max(...bracket.map(m => Number(m[rKey] ?? 0)));
+  const inFinalRound = bracket.filter(m => Number(m[rKey] ?? 0) === maxRound);
+  let finals = inFinalRound.find(m => teamsFromMatch(m).every(Boolean) && winnerFromMatch(m) != null) || inFinalRound[0];
+  const champ = winnerFromMatch(finals);
+  const [f1, f2] = teamsFromMatch(finals);
+  const runner = champ != null && f1 != null && f2 != null ? (String(champ) === String(f1) ? f2 : f1) : null;
+  let third = null; const other = inFinalRound.find(m => m !== finals && teamsFromMatch(m).every(Boolean));
+  if (other) { const thirdWinner = winnerFromMatch(other); if (thirdWinner != null) third = thirdWinner; }
+  return { champion: champ, runnerUp: runner, third };
+}
+function rosterNameFromId(rosters, users, rosterId) {
+  const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
+  const r = rosters.find(x => String(x.roster_id) === String(rosterId));
+  return r ? (r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`) : null;
+}
+
+/* Summarize a league (used for seasons cards & all-time aggregation) */
+async function fetchLeagueBundle(leagueId) {
+  const league = await fetchJson(`/league/${leagueId}`);
+  const [users, rosters] = await Promise.all([
+    fetchJson(`/league/${leagueId}/users`),
+    fetchJson(`/league/${leagueId}/rosters`)
+  ]);
+
+  let podium = { champion:null, runnerUp:null, third:null };
+  try {
+    const wb = await fetchJson(`/league/${leagueId}/winners_bracket`);
+    podium = podiumFromBracket(wb);
+  } catch {}
+
+  return { league, users, rosters, podium };
+}
+
+async function summarizeLeagueById(leagueId) {
+  const { league, users, rosters, podium } = await fetchLeagueBundle(leagueId);
+
+  const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
+  const sorted = [...rosters].sort((a,b) => (b?.settings?.wins ?? 0) - (a?.settings?.wins ?? 0) || (b?.settings?.fpts ?? 0) - (a?.settings?.fpts ?? 0));
+  const best = sorted[0];
+  const pfLeader = [...rosters].sort((a,b)=> (b?.settings?.fpts ?? 0) - (a?.settings?.fpts ?? 0))[0];
+
+  return {
+    season: league.season,
+    leagueName: league.name || "League",
+    teamCount: league.total_rosters ?? users.length,
+    bestRecord: best ? `${best?.settings?.wins ?? 0}-${best?.settings?.losses ?? 0}` : "—",
+    bestName: best ? (best?.settings?.team_name || userMap[best.owner_id] || `Roster ${best.roster_id}`) : "—",
+    pfLeader: pfLeader ? (pfLeader?.settings?.team_name || userMap[pfLeader.owner_id] || `Roster ${pfLeader.roster_id}`) : "—",
+    pf: pfLeader?.settings?.fpts ?? 0,
+    champion: podium.champion != null ? rosterNameFromId(rosters, users, podium.champion) : "—",
+    runnerUp: podium.runnerUp != null ? rosterNameFromId(rosters, users, podium.runnerUp) : "—",
+    third: podium.third != null ? rosterNameFromId(rosters, users, podium.third) : "—",
+    leagueId
+  };
+}
+
+async function loadSeasonsSummary() {
+  try {
+    seasonsHint.textContent = "Loading seasons…";
+    const order = [2025, 2024, 2023, 2022];
+    const summaries = [];
+    for (const yr of order) {
+      const id = LEAGUES[yr];
+      if (!id) continue;
+      summaries.push(await summarizeLeagueById(id));
+    }
+
+    seasonsCards.innerHTML = summaries.map(s => `
+      <div class="card">
+        <h3>${s.season}</h3>
+        <div class="kv"><span>Teams</span><span>${s.teamCount}</span></div>
+        <div class="kv"><span>Best Record</span><span>${s.bestRecord}</span></div>
+        <div class="kv"><span>Regular-season leader</span><span>${s.bestName}</span></div>
+        <div class="kv"><span>PF leader</span><span>${s.pfLeader} (${s.pf})</span></div>
+        <div class="kv"><span>Champion</span><span>${s.champion}</span></div>
+        <div class="kv"><span>Runner-up</span><span>${s.runnerUp}</span></div>
+        <div class="kv"><span>Third</span><span>${s.third}</span></div>
+        <div style="margin-top:8px">
+          <span class="link" data-league="${s.leagueId}">Open season →</span>
+        </div>
+      </div>
+    `).join("");
+
+    seasonsCards.querySelectorAll('.link').forEach(a => {
+      a.addEventListener('click', () => openSeasonDetail(a.dataset.league));
+    });
+
+    seasonsHint.textContent = `Loaded ${summaries.length} season(s). Click a card to view details.`;
+  } catch (e) {
+    seasonsHint.textContent = `Couldn’t load seasons: ${e.message}`;
+  }
+}
+
+async function openSeasonDetail(leagueId) {
+  try {
+    setActive('seasonDetail');
+    seasonTitle.textContent = `Season ${leagueId}`;
+    const { league, users, rosters, podium } = await fetchLeagueBundle(leagueId);
+    seasonTitle.textContent = `Season ${league.season}`;
+
+    const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
+    const champ = podium.champion != null ? rosterNameFromId(rosters, users, podium.champion) : "—";
+    const runner = podium.runnerUp != null ? rosterNameFromId(rosters, users, podium.runnerUp) : "—";
+    const third = podium.third != null ? rosterNameFromId(rosters, users, podium.third) : "—";
+
+    seasonMeta.innerHTML = `
+      <span class="pill">${league.name || "League"}</span>
+      <span class="muted"> • Rosters: ${league.total_rosters ?? users.length}</span>
+      <span class="muted"> • ID: ${leagueId}</span>
+      <span class="muted"> • Champion: ${champ} • Runner-up: ${runner} • Third: ${third}</span>
+    `;
+
+    const sorted = [...rosters].sort((a,b) => (b?.settings?.wins ?? 0) - (a?.settings?.wins ?? 0) || (b?.settings?.fpts ?? 0) - (a?.settings?.fpts ?? 0));
+    const rows = sorted.map((r, i) => [
+      i+1,
+      r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`,
+      r?.settings?.wins ?? 0,
+      r?.settings?.losses ?? 0,
+      r?.settings?.fpts ?? 0,
+      r?.settings?.fpts_against ?? 0,
+      ((r?.settings?.fpts ?? 0) / Math.max(1, (r?.settings?.wins ?? 0) + (r?.settings?.losses ?? 0))).toFixed(2)
+    ]);
+
+    seasonStandings.innerHTML = table(["Rank","Team","W","L","PF","PA","Avg PF/G"], rows);
+  } catch (e) {
+    seasonMeta.textContent = `Error loading season: ${e.message}`;
+    seasonStandings.innerHTML = "";
+  }
+}
+
+/* ---------- Previews: storage + generator (same as before) ---------- */
+function previewKey(week, matchupId) {
+  const leagueId = LEAGUES[CURRENT_SEASON];
+  return `sleeper_previews_${leagueId}_${week}_${matchupId}`;
+}
+function loadPreview(week, matchupId) { return localStorage.getItem(previewKey(week, matchupId)) || ""; }
+function savePreview(week, matchupId, text) { localStorage.setItem(previewKey(week, matchupId), text || ""); }
+
+async function generatePreviewLocal({ week, a, b, teamNameA, teamNameB, rosters, users }) {
+  const leagueId = LEAGUES[CURRENT_SEASON];
+  const { PowerScore, recentPFpg } = await computePower(leagueId, rosters, 3, Number(weekInput.value || week || 1));
+
+  const idxByRoster = new Map(); rosters.forEach((r,i)=> idxByRoster.set(String(r.roster_id), i));
+  const ia = idxByRoster.get(String(a.roster_id));
+  const ib = idxByRoster.get(String(b.roster_id));
+
+  const wins = r => r?.settings?.wins ?? 0;
+  const losses = r => r?.settings?.losses ?? 0;
+  const pf = r => r?.settings?.fpts ?? 0;
+  const pa = r => r?.settings?.fpts_against ?? 0;
+
+  const pwrA = ia != null ? PowerScore[ia] : 0.5;
+  const pwrB = ib != null ? PowerScore[ib] : 0.5;
+  const prA = (pwrA * 100).toFixed(1), prB = (pwrB * 100).toFixed(1);
+  const recA = ia != null ? recentPFpg[ia] : 0;
+  const recB = ib != null ? recentPFpg[ib] : 0;
+
+  const edge = (pwrA - pwrB);
+  const fave = edge >= 0 ? teamNameA : teamNameB;
+  const conf  = Math.min(12, Math.max(3, Math.round(Math.abs(edge) * 14)));
+
+  const gpA = Math.max(1, wins(a)+losses(a)), gpB = Math.max(1, wins(b)+losses(b));
+  const pfpgA = pf(a)/gpA, pfpgB = pf(b)/gpB;
+  const projA = Math.round((pfpgA*0.7 + recA*0.3));
+  const projB = Math.round((pfpgB*0.7 + recB*0.3));
+  const proj = `${fave} ${Math.max(projA, projB)}–${Math.min(projA, projB)}`;
+
+  const streak = r => (r?.metadata?.streak || "").replace(/_/g,' ');
+  const txt = `
+**Week ${week} Preview: ${teamNameA} vs ${teamNameB}**
+
+${teamNameA}: ${wins(a)}-${losses(a)} (PF ${pf(a)}, PA ${pa(a)}), PowerScore ${prA}. ${streak(a) ? `Streak: ${streak(a)}.` : "" }
+${teamNameB}: ${wins(b)}-${losses(b)} (PF ${pf(b)}, PA ${pa(b)}), PowerScore ${prB}. ${streak(b) ? `Streak: ${streak(b)}.` : "" }
+
+**Edge:** ${fave} by model (confidence ${conf}/12). Recent form favors ${(recA >= recB) ? teamNameA : teamNameB}.
+
+**X-factors:** 
+- Efficiency: ${teamNameA} ${pfpgA.toFixed(1)} PF/G vs ${teamNameB} ${pfpgB.toFixed(1)} PF/G.
+- Recent scoring: ${teamNameA} ${recA.toFixed(1)} vs ${teamNameB} ${recB.toFixed(1)} (last 3).
+- Schedule luck matters—but scoring power drives the projection.
+
+**Pick:** ${proj}
+`.trim();
+  return txt;
+}
+
+function renderPreviews(week, groups, users, rosters) {
+  const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
+  const nameOfRoster = (rid) => {
+    const r = rosters.find(x => x.roster_id === rid) || {};
+    return r?.settings?.team_name || userMap[r.owner_id] || `Roster ${rid}`;
+  };
+
+  const cards = Object.entries(groups).map(([mid, arr]) => {
+    if (arr.length !== 2) return '';
+    const [a,b] = arr;
+    const saved = loadPreview(week, mid);
+    return `
+      <div class="card preview-card" data-mid="${mid}">
+        <h3>Week ${week} • ${nameOfRoster(a.roster_id)} vs ${nameOfRoster(b.roster_id)}</h3>
+        <div class="preview-meta">
+          <span class="pill">Matchup ID: ${mid}</span>
+          <span>Team A PF: ${rosters.find(r=>r.roster_id===a.roster_id)?.settings?.fpts ?? 0}</span>
+          <span>Team B PF: ${rosters.find(r=>r.roster_id===b.roster_id)?.settings?.fpts ?? 0}</span>
+        </div>
+        <textarea class="preview" placeholder="Write your preview...">${saved}</textarea>
+        <div class="btnrow">
+          <button class="secondary genOneBtn">Auto-fill (Local AI)</button>
+          <button class="primary saveBtn">Save</button>
+        </div>
+      </div>
+    `;
+  }).filter(Boolean);
+
+  previewsWrap.innerHTML = cards.join("");
+  previewsWrap.querySelectorAll('.preview-card').forEach(card => {
+    const mid = card.dataset.mid;
+    const genBtn = card.querySelector('.genOneBtn');
+    const saveBtn = card.querySelector('.saveBtn');
+    const ta = card.querySelector('textarea.preview');
+
+    genBtn.addEventListener('click', async () => {
+      const arr = groups[mid]; if (!arr || arr.length !== 2) return;
+      const [a,b] = arr;
+      ta.value = "Generating…";
+      try {
+        ta.value = await generatePreviewLocal({
+          week,
+          a, b,
+          teamNameA: (rosters.find(r=>r.roster_id===a.roster_id)?.settings?.team_name) || "Team A",
+          teamNameB: (rosters.find(r=>r.roster_id===b.roster_id)?.settings?.team_name) || "Team B",
+          rosters, users
+        });
+      } catch (e) { ta.value = `Could not generate: ${e.message}`; }
+    });
+
+    saveBtn.addEventListener('click', () => {
+      savePreview(week, mid, ta.value);
+      saveBtn.textContent = "Saved ✓";
+      setTimeout(()=> saveBtn.textContent = "Save", 1200);
+    });
+  });
+}
+
+/* ---------- ALL-TIME RANKINGS ---------- */
+function csvEscape(v){ if (v==null) return ""; const s=String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; }
+function downloadCSV(filename, rows, headers){
+  const csv = [headers.join(",")].concat(rows.map(r=> r.map(csvEscape).join(","))).join("\n");
+  const blob = new Blob([csv], {type:"text/csv"}); const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url);
+}
+
+function accumulate(obj, key, fn){ obj[key] = fn(obj[key] || 0); }
+
+async function computeAllTime() {
+  const years = [2025, 2024, 2023, 2022];
+  const agg = {}; // user_id -> stats
+  const nameSeen = {}; // user_id -> latest team name
+
+  for (const yr of years) {
+    const leagueId = LEAGUES[yr]; if (!leagueId) continue;
+    const { league, users, rosters, podium } = await fetchLeagueBundle(leagueId);
+
+    const rosterToOwner = {}; rosters.forEach(r => { rosterToOwner[r.roster_id] = r.owner_id; });
+    const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
+
+    // Regular season totals
+    rosters.forEach(r => {
+      const uid = r.owner_id; if (!uid) return;
+      const wins = r?.settings?.wins ?? 0;
+      const losses = r?.settings?.losses ?? 0;
+      const pf = r?.settings?.fpts ?? 0;
+
+      if (!agg[uid]) agg[uid] = { user_id: uid, display: userMap[uid] || uid, seasons: 0, wins:0, losses:0, pf:0, titles:0, finals:0, thirds:0 };
+      nameSeen[uid] = r?.settings?.team_name || userMap[uid] || `Manager ${uid}`;
+      agg[uid].seasons += 1;
+      agg[uid].wins += wins;
+      agg[uid].losses += losses;
+      agg[uid].pf += pf;
+    });
+
+    // Podium (titles / finals / third)
+    const champion = podium.champion != null ? rosterToOwner[podium.champion] : null;
+    const runner   = podium.runnerUp != null ? rosterToOwner[podium.runnerUp] : null;
+    const third    = podium.third != null ? rosterToOwner[podium.third] : null;
+    if (champion && agg[champion]) agg[champion].titles += 1;
+    if (runner && agg[runner]) agg[runner].finals += 1;
+    if (third && agg[third]) agg[third].thirds += 1;
+  }
+
+  // Derive rates
+  const arr = Object.values(agg).map(a => {
+    const games = Math.max(1, a.wins + a.losses);
+    return {
+      ...a,
+      name: nameSeen[a.user_id] || a.display,
+      winpct: (a.wins / games),
+      pfpg: (a.pf / games)
+    };
+  });
+
+  // Build normalized components
+  const vec = (key) => arr.map(x => x[key] ?? 0);
+  const nWins = normalize(vec('wins'));
+  const nPF   = normalize(vec('pf'));
+  const nWinP = normalize(vec('winpct'));
+  const nPFPG = normalize(vec('pfpg'));
+  const nTit  = normalize(vec('titles'));
+  const nFin  = normalize(vec('finals'));
+
+  // Weights (tweak here)
+  const W = { TITLES:0.25, PF:0.25, WINS:0.25, WINP:0.15, FINALS:0.05, PFPG:0.05 };
+
+  arr.forEach((x,i) => {
+    x.score = W.TITLES*nTit[i] + W.PF*nPF[i] + W.WINS*nWins[i] + W.WINP*nWinP[i] + W.FINALS*nFin[i] + W.PFPG*nPFPG[i];
+  });
+
+  // Sort and return rows
+  arr.sort((a,b)=> b.score - a.score);
+  return arr;
+}
+
+function renderAllTimeTable(data) {
+  const rows = data.map((x, idx) => [
+    idx+1,
+    x.name,
+    x.seasons,
+    x.titles,
+    x.finals,
+    x.wins,
+    x.losses,
+    (x.winpct*100).toFixed(1)+"%",
+    Math.round(x.pf),
+    x.pfpg.toFixed(1),
+    (x.score*100).toFixed(1)
+  ]);
+  allTimeWrap.innerHTML = table(
+    ["Rank","Manager / Team","Seasons","Titles","Finals","Wins","Losses","Win%","Total PF","PF/G","All-Time Score"],
+    rows
+  );
+
+  // Wire CSV export
+  el("#exportAllTimeBtn").onclick = () => {
+    downloadCSV("all_time_power.csv", rows, ["Rank","Manager/Team","Seasons","Titles","Finals","Wins","Losses","Win%","Total PF","PF/G","All-Time Score"]);
+  };
+}
+
+/* ---------- Events & Init ---------- */
+el("#autoWeekBtn").addEventListener("click", getCurrentWeek);
+el("#loadBtn").addEventListener("click", loadCurrentLeague);
+el("#matchupsBtn").addEventListener("click", async () => {
+  await loadMatchups();
+  setActive('previews');
+});
+el("#genAllBtn").addEventListener("click", async () => {
+  const week = Number(weekInput.value);
+  const rosters = cache.rosters, users = cache.users;
+  const matchups = cache.matchupsByWeek[week] || [];
+  const groups = {};
+  matchups.forEach(m => { const id = m.matchup_id ?? `solo-${m.roster_id}`; (groups[id] ||= []).push(m); });
+
+  const cards = previewsWrap.querySelectorAll('.preview-card');
+  for (const card of cards) {
+    const mid = card.dataset.mid;
+    const arr = groups[mid]; if (!arr || arr.length !== 2) continue;
+    const [a,b] = arr;
+    const ta = card.querySelector('textarea.preview');
+    ta.value = "Generating…";
+    try {
+      ta.value = await generatePreviewLocal({
+        week,
+        a, b,
+        teamNameA: (rosters.find(r=>r.roster_id===a.roster_id)?.settings?.team_name) || "Team A",
+        teamNameB: (rosters.find(r=>r.roster_id===b.roster_id)?.settings?.team_name) || "Team B",
+        rosters, users
+      });
+    } catch (e) { ta.value = `Could not generate: ${e.message}`; }
+  }
+});
+
+// All-Time compute/refresh
+el("#refreshAllTimeBtn").addEventListener("click", async () => {
+  allTimeWrap.textContent = "Computing…";
+  try {
+    const data = await computeAllTime();
+    renderAllTimeTable(data);
+  } catch (e) {
+    allTimeWrap.textContent = "Error: " + e.message;
+  }
+});
+
+getCurrentWeek();
+loadCurrentLeague();
+</script>
+</body>
+</html>
