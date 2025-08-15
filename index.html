@@ -69,7 +69,6 @@
   .avatar-initial { width:22px; height:22px; font-size:12px; border-radius:50%; }
   .avatar-initial-sm { width:18px; height:18px; font-size:11px; border-radius:50%; }
 
-  /* Previews */
   .preview-card { display:flex; flex-direction:column; gap:10px; }
   .preview-meta { display:flex; gap:8px; flex-wrap:wrap; color:var(--muted); font-size:12px; }
   textarea.preview {
@@ -193,6 +192,14 @@
 <div id="seasons" class="view">
   <section>
     <h2>Past Seasons</h2>
+
+    <!-- Seed UI only appears if auto ESPN fetch fails (e.g., CORS on file://) -->
+    <div id="espnSeedRow" class="btnrow" style="display:none; margin-bottom:10px;">
+      <input id="espnSeedFile" type="file" accept="application/json" style="display:none;">
+      <button id="espnSeedBtn" class="secondary">Seed 2021 (from file)</button>
+      <span class="muted">If your browser blocks ESPN, choose the downloaded JSON once. We’ll cache it.</span>
+    </div>
+
     <div class="muted" id="seasonsHint">Includes ESPN 2021 (auto) and Sleeper 2022–2025.</div>
     <div id="seasonsCards" class="cards" style="margin-top:10px;"></div>
   </section>
@@ -285,9 +292,7 @@ function setActive(tab) {
   document.querySelectorAll('.tabbtn').forEach(b => b.classList.remove('active'));
   el("#"+tab).classList.add('active');
   document.querySelector(`.tabbtn[data-tab="${tab}"]`)?.classList.add('active');
-  if (tab === 'alltime') { // lazy ensure
-    ensureRivalriesComputed().catch(()=>{});
-  }
+  if (tab === 'alltime') { ensureRivalriesComputed().catch(()=>{}); }
 }
 document.querySelectorAll('.tabbtn').forEach(b => b.addEventListener('click', () => setActive(b.dataset.tab)));
 
@@ -475,6 +480,154 @@ function buildClassicStandings(users, rosters) {
   return table(["Rank","Team","W","L","PF","PA","Avg PF/G"], rows);
 }
 
+/* ---------- Sleeper & Manual league bundle helpers ---------- */
+async function fetchLeagueBundleSleeper(leagueId){
+  const league = await fetchJson(`/league/${leagueId}`);
+  const [users, rosters] = await Promise.all([
+    fetchJson(`/league/${leagueId}/users`),
+    fetchJson(`/league/${leagueId}/rosters`)
+  ]);
+  registerProfilesFromSleeper(users);
+  let podium = { champion:null, runnerUp:null, third:null };
+  try {
+    const wb = await fetchJson(`/league/${leagueId}/winners_bracket`);
+    podium = podiumFromBracket(wb);
+  } catch {}
+  return { league, users, rosters, podium };
+}
+async function fetchLeagueBundle(leagueId) { return fetchLeagueBundleSleeper(leagueId); }
+
+/* ---------- Seasons summary & detail ---------- */
+function teamsFromMatch(m) { return [m.t1 ?? m.team1 ?? m.roster_id_1 ?? null, m.t2 ?? m.team2 ?? m.roster_id_2 ?? null]; }
+function pointsFromMatch(m) { return [m.t1_points ?? m.p1 ?? m.points1 ?? m.score1 ?? null, m.t2_points ?? m.p2 ?? m.points2 ?? m.score2 ?? null]; }
+function winnerFromMatch(m) {
+  const wf = ['w','winner'].find(k => k in m); if (wf && m[wf] != null) return m[wf];
+  const [t1,t2] = teamsFromMatch(m), [p1,p2] = pointsFromMatch(m);
+  if (t1 != null && t2 != null && p1 != null && p2 != null) return Number(p1) === Number(p2) ? t1 : (Number(p1) > Number(p2) ? t1 : t2);
+  return null;
+}
+function podiumFromBracket(bracket) {
+  if (!Array.isArray(bracket) || bracket.length === 0) return { champion:null, runnerUp:null, third:null };
+  const rKey = ['r','round','bracket_round'].find(k => bracket.some(x => k in x)) || 'r';
+  const maxRound = Math.max(...bracket.map(m => Number(m[rKey] ?? 0)));
+  const inFinalRound = bracket.filter(m => Number(m[rKey] ?? 0) === maxRound);
+  let finals = inFinalRound.find(m => teamsFromMatch(m).every(Boolean) && winnerFromMatch(m) != null) || inFinalRound[0];
+  const champ = winnerFromMatch(finals);
+  const [f1, f2] = teamsFromMatch(finals);
+  const runner = champ != null && f1 != null && f2 != null ? (String(champ) === String(f1) ? f2 : f1) : null;
+  let third = null; const other = inFinalRound.find(m => m !== finals && teamsFromMatch(m).every(Boolean));
+  if (other) { const thirdWinner = winnerFromMatch(other); if (thirdWinner != null) third = thirdWinner; }
+  return { champion: champ, runnerUp: runner, third };
+}
+async function summarizeLeagueById(leagueId) {
+  const { league, users, rosters, podium } = await fetchLeagueBundle(leagueId);
+  const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
+
+  const sorted = [...rosters].sort((a,b) => (b?.settings?.wins ?? 0) - (a?.settings?.wins ?? 0) || (b?.settings?.fpts ?? 0) - (a?.settings?.fpts ?? 0));
+  const best = sorted[0];
+  const pfLeader = [...rosters].sort((a,b)=> (b?.settings?.fpts ?? 0) - (a?.settings?.fpts ?? 0))[0];
+
+  function rosterNameFromIdLocal(rosterId){
+    const r = rosters.find(x=> String(x.roster_id)===String(rosterId));
+    return r ? (r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`) : null;
+    }
+
+  return {
+    season: league.season,
+    leagueName: league.name || "League",
+    teamCount: league.total_rosters ?? users.length,
+    bestRecord: best ? `${best?.settings?.wins ?? 0}-${best?.settings?.losses ?? 0}` : "—",
+    bestName: best ? (best?.settings?.team_name || userMap[best.owner_id] || `Roster ${best.roster_id}`) : "—",
+    pfLeader: pfLeader ? (pfLeader?.settings?.team_name || userMap[pfLeader.owner_id] || `Roster ${pfLeader.roster_id}`) : "—",
+    pf: pfLeader?.settings?.fpts ?? 0,
+    champion: podium.champion != null ? rosterNameFromIdLocal(podium.champion) : "—",
+    runnerUp: podium.runnerUp != null ? rosterNameFromIdLocal(podium.runnerUp) : "—",
+    third: podium.third != null ? rosterNameFromIdLocal(podium.third) : "—",
+    leagueId,
+    championOwner: (podium.champion != null) ? rosters.find(r=>r.roster_id===podium.champion)?.owner_id : null,
+    runnerOwner: (podium.runnerUp != null) ? rosters.find(r=>r.roster_id===podium.runnerUp)?.owner_id : null,
+    thirdOwner: (podium.third != null) ? rosters.find(r=>r.roster_id===podium.third)?.owner_id : null
+  };
+}
+async function loadSeasonsSummary() {
+  try {
+    seasonsHint.textContent = "Loading seasons…";
+    const years = [2025, 2024, 2023, 2022, 2021];
+    const summaries = [];
+    for (const yr of years) {
+      const id = LEAGUES[yr] || (MANUAL[manualKey(yr)] ? manualKey(yr) : null);
+      if (!id) continue;
+      const s = await summarizeLeagueById(id);
+      summaries.push(s);
+    }
+
+    seasonsCards.innerHTML = summaries.map(s => `
+      <div class="card">
+        <h3>${s.season}</h3>
+        <div class="kv"><span>Teams</span><span>${s.teamCount}</span></div>
+        <div class="kv"><span>Best Record</span><span>${s.bestRecord}</span></div>
+        <div class="kv"><span>Regular-season leader</span><span>${esc(s.bestName)}</span></div>
+        <div class="kv"><span>PF leader</span><span>${esc(s.pfLeader)} (${s.pf})</span></div>
+        <div class="kv"><span>Champion</span><span>${s.championOwner ? nameCellForOwner(s.championOwner, s.champion, true) : esc(s.champion)}</span></div>
+        <div class="kv"><span>Runner-up</span><span>${s.runnerOwner ? nameCellForOwner(s.runnerOwner, s.runnerUp, true) : esc(s.runnerUp)}</span></div>
+        <div class="kv"><span>Third</span><span>${s.thirdOwner ? nameCellForOwner(s.thirdOwner, s.third, true) : esc(s.third)}</span></div>
+        <div style="margin-top:8px">
+          <span class="link" data-league="${s.leagueId}">Open season →</span>
+        </div>
+      </div>
+    `).join("");
+
+    seasonsCards.querySelectorAll('.link').forEach(a => {
+      a.addEventListener('click', () => openSeasonDetail(a.dataset.league));
+    });
+
+    seasonsHint.textContent = `Loaded ${summaries.length} season(s). Click a card to view details.`;
+  } catch (e) { seasonsHint.textContent = `Couldn’t load seasons: ${e.message}`; }
+}
+async function openSeasonDetail(leagueId) {
+  try {
+    setActive('seasonDetail');
+    seasonTitle.textContent = `Season ${leagueId}`;
+    const { league, users, rosters, podium } = await fetchLeagueBundle(leagueId);
+    registerProfilesFromSleeper(users);
+    seasonTitle.textContent = `Season ${league.season}`;
+
+    const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
+
+    const rosterToOwner = {}; rosters.forEach(r => rosterToOwner[r.roster_id] = r.owner_id);
+    const champ = podium.champion != null ? rosterNameFromId(rosters, users, podium.champion) : "—";
+    const runner = podium.runnerUp != null ? rosterNameFromId(rosters, users, podium.runnerUp) : "—";
+    const third = podium.third != null ? rosterNameFromId(rosters, users, podium.third) : "—";
+
+    seasonMeta.innerHTML = `
+      <span class="pill">${league.name || "League"}</span>
+      <span class="muted"> • Rosters: ${league.total_rosters ?? users.length}</span>
+      <span class="muted"> • ID: ${leagueId}</span>
+      <span class="muted"> • Champion: ${podium.champion ? nameCellForOwner(rosterToOwner[podium.champion], champ, true) : esc(champ)} • Runner-up: ${podium.runnerUp ? nameCellForOwner(rosterToOwner[podium.runnerUp], runner, true) : esc(runner)} • Third: ${podium.third ? nameCellForOwner(rosterToOwner[podium.third], third, true) : esc(third)}</span>
+    `;
+
+    const sorted = [...rosters].sort((a,b) => (b?.settings?.wins ?? 0) - (a?.settings?.wins ?? 0) || (b?.settings?.fpts ?? 0) - (a?.settings?.fpts ?? 0));
+    const rows = sorted.map((r, i) => [
+      i+1,
+      nameCellForOwner(r.owner_id, r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`),
+      r?.settings?.wins ?? 0,
+      r?.settings?.losses ?? 0,
+      r?.settings?.fpts ?? 0,
+      r?.settings?.fpts_against ?? 0,
+      ((r?.settings?.fpts ?? 0) / Math.max(1, (r?.settings?.wins ?? 0) + (r?.settings?.losses ?? 0))).toFixed(2)
+    ]);
+    seasonStandings.innerHTML = table(["Rank","Team","W","L","PF","PA","Avg PF/G"], rows);
+  } catch (e) {
+    seasonMeta.textContent = `Error loading season: ${e.message}`;
+    seasonStandings.innerHTML = "";
+  }
+}
+function rosterNameFromId(rosters, users, rosterId) {
+  const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
+  const r = rosters.find(x => String(x.roster_id) === String(rosterId));
+  return r ? (r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`) : null;
+}
+
 /* ---------- Current (2025) league → dashboard ---------- */
 async function loadCurrentLeague() {
   try {
@@ -578,158 +731,6 @@ async function loadMatchups() {
   }
 }
 
-/* ---------- Seasons (summary + podium) ---------- */
-function teamsFromMatch(m) { return [m.t1 ?? m.team1 ?? m.roster_id_1 ?? null, m.t2 ?? m.team2 ?? m.roster_id_2 ?? null]; }
-function pointsFromMatch(m) { return [m.t1_points ?? m.p1 ?? m.points1 ?? m.score1 ?? null, m.t2_points ?? m.p2 ?? m.points2 ?? m.score2 ?? null]; }
-function winnerFromMatch(m) {
-  const wf = ['w','winner'].find(k => k in m); if (wf && m[wf] != null) return m[wf];
-  const [t1,t2] = teamsFromMatch(m), [p1,p2] = pointsFromMatch(m);
-  if (t1 != null && t2 != null && p1 != null && p2 != null) return Number(p1) === Number(p2) ? t1 : (Number(p1) > Number(p2) ? t1 : t2);
-  return null;
-}
-function podiumFromBracket(bracket) {
-  if (!Array.isArray(bracket) || bracket.length === 0) return { champion:null, runnerUp:null, third:null };
-  const rKey = ['r','round','bracket_round'].find(k => bracket.some(x => k in x)) || 'r';
-  const maxRound = Math.max(...bracket.map(m => Number(m[rKey] ?? 0)));
-  const inFinalRound = bracket.filter(m => Number(m[rKey] ?? 0) === maxRound);
-  let finals = inFinalRound.find(m => teamsFromMatch(m).every(Boolean) && winnerFromMatch(m) != null) || inFinalRound[0];
-  const champ = winnerFromMatch(finals);
-  const [f1, f2] = teamsFromMatch(finals);
-  const runner = champ != null && f1 != null && f2 != null ? (String(champ) === String(f1) ? f2 : f1) : null;
-  let third = null; const other = inFinalRound.find(m => m !== finals && teamsFromMatch(m).every(Boolean));
-  if (other) { const thirdWinner = winnerFromMatch(other); if (thirdWinner != null) third = thirdWinner; }
-  return { champion: champ, runnerUp: runner, third };
-}
-function rosterNameFromId(rosters, users, rosterId) {
-  const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
-  const r = rosters.find(x => String(x.roster_id) === String(rosterId));
-  return r ? (r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`) : null;
-}
-
-/* Sleeper + Manual bundles */
-async function fetchLeagueBundleSleeper(leagueId){
-  const league = await fetchJson(`/league/${leagueId}`);
-  const [users, rosters] = await Promise.all([
-    fetchJson(`/league/${leagueId}/users`),
-    fetchJson(`/league/${leagueId}/rosters`)
-  ]);
-  registerProfilesFromSleeper(users);
-  let podium = { champion:null, runnerUp:null, third:null };
-  try {
-    const wb = await fetchJson(`/league/${leagueId}/winners_bracket`);
-    podium = podiumFromBracket(wb);
-  } catch {}
-  return { league, users, rosters, podium };
-}
-
-/* Hookable fetchLeagueBundle (manual support injected later) */
-async function fetchLeagueBundle(leagueId) { return fetchLeagueBundleSleeper(leagueId); }
-
-async function summarizeLeagueById(leagueId) {
-  const { league, users, rosters, podium } = await fetchLeagueBundle(leagueId);
-  const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
-  const rosterToOwner = {}; rosters.forEach(r => rosterToOwner[r.roster_id] = r.owner_id);
-
-  const sorted = [...rosters].sort((a,b) => (b?.settings?.wins ?? 0) - (a?.settings?.wins ?? 0) || (b?.settings?.fpts ?? 0) - (a?.settings?.fpts ?? 0));
-  const best = sorted[0];
-  const pfLeader = [...rosters].sort((a,b)=> (b?.settings?.fpts ?? 0) - (a?.settings?.fpts ?? 0))[0];
-
-  return {
-    season: league.season,
-    leagueName: league.name || "League",
-    teamCount: league.total_rosters ?? users.length,
-    bestRecord: best ? `${best?.settings?.wins ?? 0}-${best?.settings?.losses ?? 0}` : "—",
-    bestName: best ? (best?.settings?.team_name || userMap[best.owner_id] || `Roster ${best.roster_id}`) : "—",
-    pfLeader: pfLeader ? (pfLeader?.settings?.team_name || userMap[pfLeader.owner_id] || `Roster ${pfLeader.roster_id}`) : "—",
-    pf: pfLeader?.settings?.fpts ?? 0,
-    champion: podium.champion != null ? rosterNameFromId(rosters, users, podium.champion) : "—",
-    runnerUp: podium.runnerUp != null ? rosterNameFromId(rosters, users, podium.runnerUp) : "—",
-    third: podium.third != null ? rosterNameFromId(rosters, users, podium.third) : "—",
-    championOwner: (podium.champion != null) ? rosterToOwner[podium.champion] : null,
-    runnerOwner: (podium.runnerUp != null) ? rosterToOwner[podium.runnerUp] : null,
-    thirdOwner: (podium.third != null) ? rosterToOwner[podium.third] : null,
-    leagueId
-  };
-}
-
-async function loadSeasonsSummary() {
-  try {
-    seasonsHint.textContent = "Loading seasons…";
-    const years = [2025, 2024, 2023, 2022, 2021];
-    const summaries = [];
-    for (const yr of years) {
-      const id = LEAGUES[yr] || (MANUAL[manualKey(yr)] ? manualKey(yr) : null);
-      if (!id) continue;
-      const s = await summarizeLeagueById(id);
-      summaries.push(s);
-    }
-
-    seasonsCards.innerHTML = summaries.map(s => `
-      <div class="card">
-        <h3>${s.season}</h3>
-        <div class="kv"><span>Teams</span><span>${s.teamCount}</span></div>
-        <div class="kv"><span>Best Record</span><span>${s.bestRecord}</span></div>
-        <div class="kv"><span>Regular-season leader</span><span>${esc(s.bestName)}</span></div>
-        <div class="kv"><span>PF leader</span><span>${esc(s.pfLeader)} (${s.pf})</span></div>
-        <div class="kv"><span>Champion</span><span>${s.championOwner ? nameCellForOwner(s.championOwner, s.champion, true) : esc(s.champion)}</span></div>
-        <div class="kv"><span>Runner-up</span><span>${s.runnerOwner ? nameCellForOwner(s.runnerOwner, s.runnerUp, true) : esc(s.runnerUp)}</span></div>
-        <div class="kv"><span>Third</span><span>${s.thirdOwner ? nameCellForOwner(s.thirdOwner, s.third, true) : esc(s.third)}</span></div>
-        <div style="margin-top:8px">
-          <span class="link" data-league="${s.leagueId}">Open season →</span>
-        </div>
-      </div>
-    `).join("");
-
-    seasonsCards.querySelectorAll('.link').forEach(a => {
-      a.addEventListener('click', () => openSeasonDetail(a.dataset.league));
-    });
-
-    seasonsHint.textContent = `Loaded ${summaries.length} season(s). Click a card to view details.`;
-  } catch (e) {
-    seasonsHint.textContent = `Couldn’t load seasons: ${e.message}`;
-  }
-}
-
-async function openSeasonDetail(leagueId) {
-  try {
-    setActive('seasonDetail');
-    seasonTitle.textContent = `Season ${leagueId}`;
-    const { league, users, rosters, podium } = await fetchLeagueBundle(leagueId);
-    registerProfilesFromSleeper(users);
-    seasonTitle.textContent = `Season ${league.season}`;
-
-    const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
-
-    const rosterToOwner = {}; rosters.forEach(r => rosterToOwner[r.roster_id] = r.owner_id);
-    const champ = podium.champion != null ? rosterNameFromId(rosters, users, podium.champion) : "—";
-    const runner = podium.runnerUp != null ? rosterNameFromId(rosters, users, podium.runnerUp) : "—";
-    const third = podium.third != null ? rosterNameFromId(rosters, users, podium.third) : "—";
-
-    seasonMeta.innerHTML = `
-      <span class="pill">${league.name || "League"}</span>
-      <span class="muted"> • Rosters: ${league.total_rosters ?? users.length}</span>
-      <span class="muted"> • ID: ${leagueId}</span>
-      <span class="muted"> • Champion: ${podium.champion ? nameCellForOwner(rosterToOwner[podium.champion], champ, true) : esc(champ)} • Runner-up: ${podium.runnerUp ? nameCellForOwner(rosterToOwner[podium.runnerUp], runner, true) : esc(runner)} • Third: ${podium.third ? nameCellForOwner(rosterToOwner[podium.third], third, true) : esc(third)}</span>
-    `;
-
-    const sorted = [...rosters].sort((a,b) => (b?.settings?.wins ?? 0) - (a?.settings?.wins ?? 0) || (b?.settings?.fpts ?? 0) - (a?.settings?.fpts ?? 0));
-    const rows = sorted.map((r, i) => [
-      i+1,
-      nameCellForOwner(r.owner_id, r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`),
-      r?.settings?.wins ?? 0,
-      r?.settings?.losses ?? 0,
-      r?.settings?.fpts ?? 0,
-      r?.settings?.fpts_against ?? 0,
-      ((r?.settings?.fpts ?? 0) / Math.max(1, (r?.settings?.wins ?? 0) + (r?.settings?.losses ?? 0))).toFixed(2)
-    ]);
-
-    seasonStandings.innerHTML = table(["Rank","Team","W","L","PF","PA","Avg PF/G"], rows);
-  } catch (e) {
-    seasonMeta.textContent = `Error loading season: ${e.message}`;
-    seasonStandings.innerHTML = "";
-  }
-}
-
 /* ---------- Previews: storage + generator ---------- */
 function previewKey(week, matchupId) {
   const leagueId = LEAGUES[CURRENT_SEASON];
@@ -785,7 +786,6 @@ ${teamNameB}: ${wins(b)}-${losses(b)} (PF ${pf(b)}, PA ${pa(b)}), PowerScore ${p
 `.trim();
   return txt;
 }
-
 function renderPreviews(week, groups, users, rosters) {
   const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
   const nameOfRoster = (rid) => {
@@ -859,7 +859,6 @@ function downloadCSV(filename, rows, headers){
   const blob = new Blob([csv], {type:"text/csv"}); const url = URL.createObjectURL(blob);
   const a = document.createElement("a"); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url);
 }
-
 async function computeAllTime() {
   const years = [2025, 2024, 2023, 2022, 2021];
   const agg = {};
@@ -940,7 +939,6 @@ function renderAllTimeTable(data) {
     rows
   );
 
-  // CSV export
   el("#exportAllTimeBtn").onclick = () => {
     const plainRows = data.map((x, idx) => [
       idx+1, x.name, x.seasons, x.titles, x.finals, x.wins, x.losses, (x.winpct*100).toFixed(1)+"%", Math.round(x.pf), x.pfpg.toFixed(1), (x.score*100).toFixed(1)
@@ -979,11 +977,11 @@ async function ensureRivalriesComputed(){
   for (const yr of years){
     const lid = LEAGUES[yr] || (MANUAL[manualKey(yr)] ? manualKey(yr) : null);
     if (!lid) continue;
-    const { league, users, rosters, podium } = await fetchLeagueBundle(lid);
+    const { league, users, rosters } = await fetchLeagueBundle(lid);
     (users||[]).forEach(u=> usersSet.add(u.user_id));
 
     if (isManualLeagueId(lid)) {
-      // Manual (ESPN 2021) — we have matchups in bundle
+      // Manual (ESPN 2021) — use embedded matchups
       const teamIndex = new Map(); rosters.forEach(r => teamIndex.set(r.roster_id, r.owner_id));
       const m = (MANUAL[manualKey(yr)]?.matchups)||[];
       const byId = {};
@@ -1089,12 +1087,8 @@ el("#genAllBtn").addEventListener("click", async () => {
 });
 el("#refreshAllTimeBtn").addEventListener("click", async () => {
   allTimeWrap.textContent = "Computing…";
-  try {
-    const data = await computeAllTime();
-    renderAllTimeTable(data);
-  } catch (e) {
-    allTimeWrap.textContent = "Error: " + e.message;
-  }
+  try { renderAllTimeTable(await computeAllTime()); }
+  catch (e) { allTimeWrap.textContent = "Error: " + e.message; }
 });
 el("#refreshRivalsBtn").addEventListener("click", async () => {
   Rivalries = null;
@@ -1104,20 +1098,19 @@ el("#refreshRivalsBtn").addEventListener("click", async () => {
 });
 rivalSelect.addEventListener("change", () => renderRivalriesFor(rivalSelect.value));
 
-/* ===================== ESPN 2021 Auto-Import (Public League: 755639) ===================== */
+/* ===================== ESPN 2021 Auto-Import with File Seed Fallback ===================== */
 const ESPN_PUBLIC_2021_LEAGUE_ID = 755639;
 const ESPN_2021_CACHE_KEY = "espn_ffl_2021_bundle_v1";
 window.MANUAL = window.MANUAL || {};
 function manualKey(year){ return `manual-${year}`; }
 function isManualLeagueId(id){ return typeof id === "string" && id.startsWith("manual-"); }
 
-/* wrap fetchLeagueBundle to support manual seasons */
+/* Enhance fetchLeagueBundle to support manual seasons */
 const _orig_fetchLeagueBundle = fetchLeagueBundle;
 fetchLeagueBundle = async function(leagueId) {
   if (isManualLeagueId(leagueId)) {
     const bundle = MANUAL[leagueId];
     if (!bundle) throw new Error(`Manual season not loaded: ${leagueId}`);
-    // register profiles
     registerProfilesFromManual(bundle.users);
     return {
       league: { season: String(bundle.season), name: bundle.league?.name || "Manual League", total_rosters: bundle.league?.total_rosters ?? (bundle.rosters?.length || 0) },
@@ -1125,10 +1118,7 @@ fetchLeagueBundle = async function(leagueId) {
       rosters: (bundle.rosters || []).map(r => ({
         roster_id: r.roster_id,
         owner_id: r.owner_id,
-        settings: {
-          team_name: r.team_name, wins: r.wins ?? 0, losses: r.losses ?? 0,
-          fpts: r.fpts ?? 0, fpts_against: r.fpts_against ?? 0
-        },
+        settings: { team_name: r.team_name, wins: r.wins ?? 0, losses: r.losses ?? 0, fpts: r.fpts ?? 0, fpts_against: r.fpts_against ?? 0 },
         metadata: { streak: r.streak || "" }
       })),
       podium: bundle._podium || { champion:null, runnerUp:null, third:null }
@@ -1137,19 +1127,107 @@ fetchLeagueBundle = async function(leagueId) {
   return _orig_fetchLeagueBundle(leagueId);
 };
 
+/* Seed UI controls (only shown when auto import fails) */
+function showEspnSeedUI() {
+  const row = document.getElementById('espnSeedRow');
+  if (row) row.style.display = 'flex';
+}
+async function seedESPN2021FromFile(file) {
+  const text = await file.text();
+  const data = JSON.parse(text);
+
+  const teams = data.teams || [];
+  const users = [], rosters = []; const seen = new Set();
+  const tName = t => (`${(t.location||"").trim()} ${(t.nickname||"").trim()}`.trim() || t.abbrev || `Team ${t.id}`);
+  const tLogo = t => (t.logo||"").trim();
+  const tRec  = t => {
+    const rec = t.record || {}, o = rec.overall || {};
+    return { w:+(o.wins||0), l:+(o.losses||0), pf:+(o.pointsFor||0), pa:+(o.pointsAgainst||0) };
+  };
+  const owner = t => (t.owners && t.owners[0]) || `unknown_${t.id}`;
+
+  teams.forEach(t => {
+    const uid = owner(t);
+    if (!seen.has(uid)) { users.push({ user_id: uid, display_name: tName(t), avatar_url: tLogo(t) }); seen.add(uid); }
+    const r = tRec(t);
+    rosters.push({ roster_id: t.id, owner_id: uid, team_name: tName(t), wins: r.w, losses: r.l, fpts: +r.pf.toFixed(2), fpts_against: +r.pa.toFixed(2), streak: "" });
+  });
+
+  const schedule = data.schedule || [];
+  const matchups = [], winners = []; let mid = 1, bid = 1000;
+  schedule.forEach(s => {
+    const h = s.home||{}, a = s.away||{};
+    const hId = h.teamId, aId = a.teamId; if (hId==null || aId==null) return;
+    const week = s.matchupPeriodId; if (week==null) return;
+    const hPts = +(h.totalPoints||0), aPts = +(a.totalPoints||0);
+    matchups.push({ week, matchup_id: mid, roster_id: hId, points: hPts });
+    matchups.push({ week, matchup_id: mid, roster_id: aId, points: aPts });
+    const tier = s.playoffTierType;
+    if (tier && /WINNERS|CHAMPIONSHIP/i.test(tier)) {
+      const winnerSide = s.winner; let wRid = null;
+      if (winnerSide === "HOME") wRid = hId; else if (winnerSide === "AWAY") wRid = aId; else wRid = (hPts >= aPts) ? hId : aId;
+      winners.push({ round: week, matchup_id: bid, roster_id_1: hId, roster_id_2: aId, t1_points: hPts, t2_points: aPts, winner_roster_id: wRid });
+      bid++;
+    }
+    mid++;
+  });
+
+  const podium = (() => {
+    if (!winners.length) return { champion:null, runnerUp:null, third:null };
+    const maxR = Math.max(...winners.map(x=> +x.round || 0));
+    const finals = winners.filter(x => +x.round === maxR);
+    const f = finals[0];
+    let champion = f?.winner_roster_id ?? null;
+    let runnerUp = f ? (champion === f.roster_id_1 ? f.roster_id_2 : f.roster_id_1) : null;
+    let third = null;
+    if (finals.length > 1) { const other = finals.find(x => x !== f); if (other) third = other.winner_roster_id ?? null; }
+    return { champion, runnerUp, third };
+  })();
+
+  const bundle = {
+    season: 2021,
+    league: { name: data?.settings?.name || "ESPN League 755639", total_rosters: teams.length },
+    users, rosters, matchups, winners_bracket: winners,
+    _podium: { champion: podium.champion, runnerUp: podium.runnerUp, third: podium.third }
+  };
+
+  localStorage.setItem(ESPN_2021_CACHE_KEY, JSON.stringify(bundle));
+  MANUAL[manualKey(2021)] = bundle;
+  LEAGUES[2021] = manualKey(2021);
+  registerProfilesFromManual(users);
+
+  // Refresh UI
+  await loadSeasonsSummary();
+  const dataAT = await computeAllTime();
+  if (typeof renderAllTimeTable === "function") renderAllTimeTable(dataAT);
+}
+// Wire seed button
+(function(){
+  const btn = document.getElementById('espnSeedBtn');
+  const file = document.getElementById('espnSeedFile');
+  if (!btn || !file) return;
+  btn.addEventListener('click', ()=> file.click());
+  file.addEventListener('change', async (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    btn.disabled = true; btn.textContent = "Seeding…";
+    try { await seedESPN2021FromFile(f); btn.textContent = "Seeded ✓"; }
+    catch(err){ alert("Failed to seed: " + err.message); btn.disabled = false; btn.textContent = "Seed 2021 (from file)"; }
+  });
+})();
+
+/* Auto-import ESPN 2021 (public). If fetch fails (CORS), show seed UI. Then init app. */
 async function importESPN2021Public(espnLeagueId = ESPN_PUBLIC_2021_LEAGUE_ID) {
-  // 1) cache?
+  // Cache hit?
   const cached = localStorage.getItem(ESPN_2021_CACHE_KEY);
   if (cached) {
     try {
       const bundle = JSON.parse(cached);
-      MANUAL[manualKey(2021)] = bundle;
-      LEAGUES[2021] = manualKey(2021);
+      MANUAL[manualKey(2021)] = bundle; LEAGUES[2021] = manualKey(2021);
       registerProfilesFromManual(bundle.users);
       return;
     } catch(_) {}
   }
-  // 2) fetch
+  // Fetch from ESPN
   const url = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/2021/segments/0/leagues/${espnLeagueId}?view=mTeam&view=mRoster&view=mMatchup&view=mSettings`;
   const res = await fetch(url, { headers: { "Accept": "application/json" } });
   if (!res.ok) throw new Error(`ESPN HTTP ${res.status}`);
@@ -1167,10 +1245,7 @@ async function importESPN2021Public(espnLeagueId = ESPN_PUBLIC_2021_LEAGUE_ID) {
 
   teams.forEach(t => {
     const uid = owner(t);
-    if (!seen.has(uid)) {
-      users.push({ user_id: uid, display_name: tName(t), avatar_url: tLogo(t) });
-      seen.add(uid);
-    }
+    if (!seen.has(uid)) { users.push({ user_id: uid, display_name: tName(t), avatar_url: tLogo(t) }); seen.add(uid); }
     const r = tRec(t);
     rosters.push({ roster_id: t.id, owner_id: uid, team_name: tName(t), wins: r.w, losses: r.l, fpts: +r.pf.toFixed(2), fpts_against: +r.pa.toFixed(2), streak: "" });
   });
@@ -1219,13 +1294,13 @@ async function importESPN2021Public(espnLeagueId = ESPN_PUBLIC_2021_LEAGUE_ID) {
   registerProfilesFromManual(users);
 }
 
-/* --- BOOTSTRAP: auto-import 2021, then normal init --- */
+/* --- BOOTSTRAP: try ESPN import; on failure show seed UI; then normal init --- */
 (async () => {
-  try { await importESPN2021Public(); } catch (e) { console.warn("ESPN 2021 import failed:", e); }
+  try { await importESPN2021Public(); }
+  catch (e) { console.warn("ESPN 2021 import failed (likely CORS):", e); showEspnSeedUI(); }
   finally {
     getCurrentWeek();
     loadCurrentLeague();
-    // precompute all-time table once
     computeAllTime().then(renderAllTimeTable).catch(()=>{});
   }
 })();
