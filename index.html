@@ -26,7 +26,7 @@
   }
   .tabbtn.active { background: linear-gradient(180deg, var(--accent) 0%, #5c52d8 100%); border:none; color:white; box-shadow: 0 6px 18px rgba(123,111,247,0.35) }
   label { font-size:12px; color:var(--muted); }
-  input, button { height:40px; border-radius:12px; border:1px solid var(--border); background:#0d0f16; color:var(--text); padding:0 12px; outline:none; }
+  input, button, select { height:40px; border-radius:12px; border:1px solid var(--border); background:#0d0f16; color:var(--text); padding:0 12px; outline:none; }
   input[type=number] { width: 96px; text-align:center; }
   button.primary { background: linear-gradient(180deg, var(--accent) 0%, #5c52d8 100%); border: none; color:white; font-weight:600; cursor:pointer; padding:0 14px; box-shadow: 0 6px 18px rgba(123,111,247,0.35); }
   button.secondary { background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface) 100%); border:1px solid var(--border); color: var(--text); }
@@ -43,10 +43,12 @@
   h2 { margin:0 0 12px; font-size:18px; letter-spacing: .2px; }
   .muted { color: var(--muted); font-size:12px; }
   .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:600; background:#111528; border:1px solid var(--border); color:var(--muted); }
+
   table { width:100%; border-collapse: collapse; font-size:13px; }
-  th, td { border-bottom:1px solid var(--border); padding:10px 8px; text-align:left; }
+  th, td { border-bottom:1px solid var(--border); padding:10px 8px; text-align:left; vertical-align: middle; }
   th { background: #14172a; color:#cfd2f0; position:sticky; top:0; z-index:1; }
   tr:hover td { background:#151a2f66; }
+
   .cards { display:grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap:14px; }
   .card {
     border:1px solid var(--border); border-radius:12px; padding:14px;
@@ -56,6 +58,17 @@
   .card .kv { font-size:13px; color:var(--muted); display:flex; justify-content:space-between; margin:2px 0; }
   .link { color: var(--accent-2); text-decoration: underline; cursor: pointer; }
   canvas { max-height: 360px; }
+
+  /* Avatars + name cells */
+  .namecell { display:flex; align-items:center; gap:8px; }
+  .avatar { width:22px; height:22px; border-radius:50%; object-fit:cover; display:inline-block; }
+  .avatar-sm { width:18px; height:18px; border-radius:50%; object-fit:cover; }
+  .avatar-initial, .avatar-initial-sm {
+    background:#2a2f45; color:#cfd2f0; display:inline-flex; align-items:center; justify-content:center; font-weight:700;
+  }
+  .avatar-initial { width:22px; height:22px; font-size:12px; border-radius:50%; }
+  .avatar-initial-sm { width:18px; height:18px; font-size:11px; border-radius:50%; }
+
   /* Previews */
   .preview-card { display:flex; flex-direction:column; gap:10px; }
   .preview-meta { display:flex; gap:8px; flex-wrap:wrap; color:var(--muted); font-size:12px; }
@@ -158,12 +171,21 @@
 <div id="alltime" class="view">
   <section>
     <h2>All-Time Power Rankings</h2>
-    <div class="muted" style="margin-bottom:6px;">Seasons: 2025, 2024, 2023, 2022 • Weights: Titles 25%, Total PF 25%, Total Wins 25%, Win% 15%, Finals 5%, PF/G 5%</div>
+    <div class="muted" style="margin-bottom:6px;">Seasons: 2025, 2024, 2023, 2022, 2021 • Weights: Titles 25%, Total PF 25%, Total Wins 25%, Win% 15%, Finals 5%, PF/G 5%</div>
     <div class="btnrow" style="margin-bottom:10px;">
       <button id="refreshAllTimeBtn" class="primary">Compute / Refresh</button>
       <button id="exportAllTimeBtn" class="secondary">Export CSV</button>
     </div>
     <div id="allTimeWrap">—</div>
+  </section>
+
+  <section>
+    <h2>Rivalries</h2>
+    <div class="btnrow" style="margin-bottom:10px;">
+      <select id="rivalSelect"></select>
+      <button id="refreshRivalsBtn" class="secondary">Refresh Rivalries</button>
+    </div>
+    <div id="rivalWrap" class="muted">Select a manager to see all-time head-to-head records.</div>
   </section>
 </div>
 
@@ -171,7 +193,7 @@
 <div id="seasons" class="view">
   <section>
     <h2>Past Seasons</h2>
-    <div class="muted" id="seasonsHint">Hardcoded: 2025, 2024, 2023, 2022.</div>
+    <div class="muted" id="seasonsHint">Includes ESPN 2021 (auto) and Sleeper 2022–2025.</div>
     <div id="seasonsCards" class="cards" style="margin-top:10px;"></div>
   </section>
 </div>
@@ -189,7 +211,7 @@
 </div>
 
 <script>
-/* --- Hardcoded league IDs --- */
+/* --- Hardcoded Sleeper league IDs --- */
 const LEAGUES = {
   2022: "783723162142658560",
   2023: "921453343510245376",
@@ -197,10 +219,10 @@ const LEAGUES = {
   2025: "1220026837208399872" // current
 };
 const CURRENT_SEASON = 2025; // dashboard default
-
 const BASE = "https://api.sleeper.app/v1";
 const el = (sel) => document.querySelector(sel);
 
+/* DOM refs */
 const weekInput = el("#week");
 const leagueInfoDiv = el("#leagueInfo"), powerWrap = el("#powerWrap"), standingsWrap = el("#standingsWrap");
 const rostersWrap = el("#rostersWrap"), matchupsWrap = el("#matchupsWrap");
@@ -209,9 +231,48 @@ const seasonTitle = el("#seasonTitle"), seasonMeta = el("#seasonMeta"), seasonSt
 const previewsWrap = el("#previewsWrap");
 const importFile = el("#importFile");
 const allTimeWrap = el("#allTimeWrap");
+const rivalWrap = el("#rivalWrap"), rivalSelect = el("#rivalSelect");
 
+/* Caches & stores */
 let charts = { scatter:null, pf:null, week:null };
-let cache = { league:null, users:[], rosters:[], matchupsByWeek:{}, seasons:{} };
+let cache = { league:null, users:[], rosters:[], matchupsByWeek:{}, seasons:{}, allMatchups:{} };
+
+/* ==== Profile store (avatars + names) ==== */
+const Profiles = new Map(); // user_id -> {name, avatar}
+function sleeperAvatarUrl(avatarId){
+  if (!avatarId) return null;
+  return `https://sleepercdn.com/avatars/thumbs/${avatarId}`;
+}
+function registerProfilesFromSleeper(users) {
+  (users||[]).forEach(u => {
+    const id = u.user_id, name = u.display_name || u.username || id;
+    const avatar = sleeperAvatarUrl(u.avatar);
+    const prev = Profiles.get(id) || {};
+    Profiles.set(id, { name: prev.name || name, avatar: avatar || prev.avatar || null });
+  });
+}
+function registerProfilesFromManual(users) {
+  (users||[]).forEach(u => {
+    const id = u.user_id, name = u.display_name || id;
+    const avatar = u.avatar_url || null;
+    const prev = Profiles.get(id) || {};
+    Profiles.set(id, { name: prev.name || name, avatar: avatar || prev.avatar || null });
+  });
+}
+function initials(str){
+  const s=(str||"").trim(); if(!s) return "?";
+  const parts = s.split(/\s+/).slice(0,2);
+  return parts.map(p=>p[0]).join("").toUpperCase();
+}
+function esc(s){ return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function nameCellForOwner(uid, label, small=false){
+  const p = Profiles.get(uid) || {};
+  const name = label || p.name || uid;
+  const av = p.avatar;
+  const img = av ? `<img class="${small?'avatar-sm':'avatar'}" src="${av}" alt="">`
+                 : `<span class="${small?'avatar-initial-sm':'avatar-initial'}">${esc(initials(name))}</span>`;
+  return `<span class="namecell">${img}<span>${esc(name)}</span></span>`;
+}
 
 /* ---------- Utilities ---------- */
 function themeColors() {
@@ -224,6 +285,9 @@ function setActive(tab) {
   document.querySelectorAll('.tabbtn').forEach(b => b.classList.remove('active'));
   el("#"+tab).classList.add('active');
   document.querySelector(`.tabbtn[data-tab="${tab}"]`)?.classList.add('active');
+  if (tab === 'alltime') { // lazy ensure
+    ensureRivalriesComputed().catch(()=>{});
+  }
 }
 document.querySelectorAll('.tabbtn').forEach(b => b.addEventListener('click', () => setActive(b.dataset.tab)));
 
@@ -233,7 +297,6 @@ async function fetchJson(path) {
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
   return res.json();
 }
-
 function table(headers, rows) {
   const th = headers.map(h => `<th>${h}</th>`).join("");
   const tr = rows.map(r => `<tr>${r.map(c => `<td>${c ?? ""}</td>`).join("")}</tr>`).join("");
@@ -281,7 +344,7 @@ function renderPFBar(rosters, userMap) {
 function renderWeekBar(rows) {
   destroyChart(charts.week);
   const c = themeColors();
-  const labels = rows.flatMap(r => [r[2], r[4]]);
+  const labels = rows.flatMap(r => [r[2].replace(/<[^>]+>/g,''), r[4].replace(/<[^>]+>/g,'')]);
   const scores = rows.flatMap(r => [Number(r[3])||0, Number(r[5])||0]);
   if (!labels.length) { charts.week = null; el("#barWeek").replaceWith(el("#barWeek").cloneNode(true)); return; }
   charts.week = new Chart(el("#barWeek"), {
@@ -335,7 +398,7 @@ async function computePower(leagueId, rosters, recentWindow = 3, currentWeek = N
       const groups = {};
       m.forEach(x => { const id = x.matchup_id ?? `solo-${x.roster_id}`; (groups[id] ||= []).push(x); });
       Object.values(groups).forEach(([a, b]) => {
-        if (!a || !b) return; // skip byes
+        if (!a || !b) return;
         const ia = teamIndex.get(String(a.roster_id));
         const ib = teamIndex.get(String(b.roster_id));
         if (ia == null || ib == null) return;
@@ -378,10 +441,11 @@ async function buildStandingsWithPower(leagueId, users, rosters) {
       losses: r?.settings?.losses ?? 0,
       pf: r?.settings?.fpts ?? 0,
       pa: r?.settings?.fpts_against ?? 0,
-      pwr: PowerScore[i]
+      pwr: PowerScore[i],
+      owner: r.owner_id
     }))
     .sort((a,b) => b.pwr - a.pwr)
-    .map((x, rank) => [rank + 1, x.team, x.wins, x.losses, x.pf, x.pa, (x.pwr*100).toFixed(1)]);
+    .map((x, rank) => [rank + 1, nameCellForOwner(x.owner, x.team), x.wins, x.losses, x.pf, x.pa, (x.pwr*100).toFixed(1)]);
 
   return table(["PWR Rank","Team","W","L","PF","PA","PowerScore"], rows);
 }
@@ -400,9 +464,10 @@ function buildClassicStandings(users, rosters) {
     const pf = r?.settings?.fpts ?? 0;
     const pa = r?.settings?.fpts_against ?? 0;
     const games = Math.max(1, wins + losses);
+    const name = r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`;
     return [
       i+1,
-      r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`,
+      nameCellForOwner(r.owner_id, name),
       wins, losses, pf, pa, (pf / games).toFixed(2)
     ];
   });
@@ -423,6 +488,7 @@ async function loadCurrentLeague() {
       fetchJson(`/league/${leagueId}/rosters`)
     ]);
     cache = { ...cache, league, users, rosters };
+    registerProfilesFromSleeper(users);
 
     const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
 
@@ -436,7 +502,7 @@ async function loadCurrentLeague() {
 
     const rosterRows = rosters.map(r => [
       r.roster_id,
-      userMap[r.owner_id] || "",
+      nameCellForOwner(r.owner_id, userMap[r.owner_id] || ""),
       r?.settings?.team_name || "",
       r?.settings?.wins ?? 0,
       r?.settings?.losses ?? 0,
@@ -472,9 +538,10 @@ async function loadMatchups() {
     ]);
 
     cache.matchupsByWeek[week] = matchups;
+    registerProfilesFromSleeper(users);
 
     const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
-    const rosterToOwner = {}; rosters.forEach(r => rosterToOwner[r.roster_id] = (r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`));
+    const rosterToOwner = {}; rosters.forEach(r => rosterToOwner[r.roster_id] = r.owner_id);
 
     const groups = {};
     matchups.forEach(m => { const id = m.matchup_id ?? `solo-${m.roster_id}`; (groups[id] ||= []).push(m); });
@@ -482,21 +549,27 @@ async function loadMatchups() {
     const rows = Object.entries(groups).map(([mid, arr]) => {
       if (arr.length === 2) {
         const [a,b] = arr;
-        const nameA = rosterToOwner[a.roster_id], nameB = rosterToOwner[b.roster_id];
+        const ownerA = rosterToOwner[a.roster_id], ownerB = rosterToOwner[b.roster_id];
+        const nameA = rosters.find(r=>r.roster_id===a.roster_id)?.settings?.team_name || userMap[ownerA] || `Roster ${a.roster_id}`;
+        const nameB = rosters.find(r=>r.roster_id===b.roster_id)?.settings?.team_name || userMap[ownerB] || `Roster ${b.roster_id}`;
         const scoreA = a.points ?? 0, scoreB = b.points ?? 0;
         const winner = scoreA === scoreB ? "Tie" : (scoreA > scoreB ? nameA : nameB);
-        return [week, mid, nameA, scoreA, nameB, scoreB, winner];
+        return [week, mid, nameCellForOwner(ownerA, nameA), scoreA, nameCellForOwner(ownerB, nameB), scoreB, esc(winner)];
       } else {
-        const only = arr[0], name = rosterToOwner[only.roster_id];
-        return [week, mid, name, (only.points ?? 0), "(bye)", "", name];
+        const only = arr[0];
+        const owner = rosterToOwner[only.roster_id];
+        const name = rosters.find(r=>r.roster_id===only.roster_id)?.settings?.team_name || userMap[owner] || `Roster ${only.roster_id}`;
+        return [week, mid, nameCellForOwner(owner, name), (only.points ?? 0), "(bye)", "", esc(name)];
       }
     }).sort((a,b)=> (b[3]+(b[5]||0)) - (a[3]+(a[5]||0)));
 
     matchupsWrap.innerHTML = rows.length
       ? table(["Week","Matchup ID","Team A","Score A","Team B","Score B","Winner"], rows)
-      : `<div class="muted">No matchups found for week ${week} (off-season or not scheduled).</div>`;
+      : `<div class="muted">No matchups found for week ${week}.</div>`;
 
     renderWeekBar(rows);
+
+    // Build previews list (with avatars in headers)
     renderPreviews(week, groups, users, rosters);
 
   } catch (err) {
@@ -533,27 +606,30 @@ function rosterNameFromId(rosters, users, rosterId) {
   return r ? (r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`) : null;
 }
 
-/* Summarize a league (used for seasons cards & all-time aggregation) */
-async function fetchLeagueBundle(leagueId) {
+/* Sleeper + Manual bundles */
+async function fetchLeagueBundleSleeper(leagueId){
   const league = await fetchJson(`/league/${leagueId}`);
   const [users, rosters] = await Promise.all([
     fetchJson(`/league/${leagueId}/users`),
     fetchJson(`/league/${leagueId}/rosters`)
   ]);
-
+  registerProfilesFromSleeper(users);
   let podium = { champion:null, runnerUp:null, third:null };
   try {
     const wb = await fetchJson(`/league/${leagueId}/winners_bracket`);
     podium = podiumFromBracket(wb);
   } catch {}
-
   return { league, users, rosters, podium };
 }
 
+/* Hookable fetchLeagueBundle (manual support injected later) */
+async function fetchLeagueBundle(leagueId) { return fetchLeagueBundleSleeper(leagueId); }
+
 async function summarizeLeagueById(leagueId) {
   const { league, users, rosters, podium } = await fetchLeagueBundle(leagueId);
-
   const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
+  const rosterToOwner = {}; rosters.forEach(r => rosterToOwner[r.roster_id] = r.owner_id);
+
   const sorted = [...rosters].sort((a,b) => (b?.settings?.wins ?? 0) - (a?.settings?.wins ?? 0) || (b?.settings?.fpts ?? 0) - (a?.settings?.fpts ?? 0));
   const best = sorted[0];
   const pfLeader = [...rosters].sort((a,b)=> (b?.settings?.fpts ?? 0) - (a?.settings?.fpts ?? 0))[0];
@@ -569,6 +645,9 @@ async function summarizeLeagueById(leagueId) {
     champion: podium.champion != null ? rosterNameFromId(rosters, users, podium.champion) : "—",
     runnerUp: podium.runnerUp != null ? rosterNameFromId(rosters, users, podium.runnerUp) : "—",
     third: podium.third != null ? rosterNameFromId(rosters, users, podium.third) : "—",
+    championOwner: (podium.champion != null) ? rosterToOwner[podium.champion] : null,
+    runnerOwner: (podium.runnerUp != null) ? rosterToOwner[podium.runnerUp] : null,
+    thirdOwner: (podium.third != null) ? rosterToOwner[podium.third] : null,
     leagueId
   };
 }
@@ -576,12 +655,13 @@ async function summarizeLeagueById(leagueId) {
 async function loadSeasonsSummary() {
   try {
     seasonsHint.textContent = "Loading seasons…";
-    const order = [2025, 2024, 2023, 2022];
+    const years = [2025, 2024, 2023, 2022, 2021];
     const summaries = [];
-    for (const yr of order) {
-      const id = LEAGUES[yr];
+    for (const yr of years) {
+      const id = LEAGUES[yr] || (MANUAL[manualKey(yr)] ? manualKey(yr) : null);
       if (!id) continue;
-      summaries.push(await summarizeLeagueById(id));
+      const s = await summarizeLeagueById(id);
+      summaries.push(s);
     }
 
     seasonsCards.innerHTML = summaries.map(s => `
@@ -589,11 +669,11 @@ async function loadSeasonsSummary() {
         <h3>${s.season}</h3>
         <div class="kv"><span>Teams</span><span>${s.teamCount}</span></div>
         <div class="kv"><span>Best Record</span><span>${s.bestRecord}</span></div>
-        <div class="kv"><span>Regular-season leader</span><span>${s.bestName}</span></div>
-        <div class="kv"><span>PF leader</span><span>${s.pfLeader} (${s.pf})</span></div>
-        <div class="kv"><span>Champion</span><span>${s.champion}</span></div>
-        <div class="kv"><span>Runner-up</span><span>${s.runnerUp}</span></div>
-        <div class="kv"><span>Third</span><span>${s.third}</span></div>
+        <div class="kv"><span>Regular-season leader</span><span>${esc(s.bestName)}</span></div>
+        <div class="kv"><span>PF leader</span><span>${esc(s.pfLeader)} (${s.pf})</span></div>
+        <div class="kv"><span>Champion</span><span>${s.championOwner ? nameCellForOwner(s.championOwner, s.champion, true) : esc(s.champion)}</span></div>
+        <div class="kv"><span>Runner-up</span><span>${s.runnerOwner ? nameCellForOwner(s.runnerOwner, s.runnerUp, true) : esc(s.runnerUp)}</span></div>
+        <div class="kv"><span>Third</span><span>${s.thirdOwner ? nameCellForOwner(s.thirdOwner, s.third, true) : esc(s.third)}</span></div>
         <div style="margin-top:8px">
           <span class="link" data-league="${s.leagueId}">Open season →</span>
         </div>
@@ -615,9 +695,12 @@ async function openSeasonDetail(leagueId) {
     setActive('seasonDetail');
     seasonTitle.textContent = `Season ${leagueId}`;
     const { league, users, rosters, podium } = await fetchLeagueBundle(leagueId);
+    registerProfilesFromSleeper(users);
     seasonTitle.textContent = `Season ${league.season}`;
 
     const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
+
+    const rosterToOwner = {}; rosters.forEach(r => rosterToOwner[r.roster_id] = r.owner_id);
     const champ = podium.champion != null ? rosterNameFromId(rosters, users, podium.champion) : "—";
     const runner = podium.runnerUp != null ? rosterNameFromId(rosters, users, podium.runnerUp) : "—";
     const third = podium.third != null ? rosterNameFromId(rosters, users, podium.third) : "—";
@@ -626,13 +709,13 @@ async function openSeasonDetail(leagueId) {
       <span class="pill">${league.name || "League"}</span>
       <span class="muted"> • Rosters: ${league.total_rosters ?? users.length}</span>
       <span class="muted"> • ID: ${leagueId}</span>
-      <span class="muted"> • Champion: ${champ} • Runner-up: ${runner} • Third: ${third}</span>
+      <span class="muted"> • Champion: ${podium.champion ? nameCellForOwner(rosterToOwner[podium.champion], champ, true) : esc(champ)} • Runner-up: ${podium.runnerUp ? nameCellForOwner(rosterToOwner[podium.runnerUp], runner, true) : esc(runner)} • Third: ${podium.third ? nameCellForOwner(rosterToOwner[podium.third], third, true) : esc(third)}</span>
     `;
 
     const sorted = [...rosters].sort((a,b) => (b?.settings?.wins ?? 0) - (a?.settings?.wins ?? 0) || (b?.settings?.fpts ?? 0) - (a?.settings?.fpts ?? 0));
     const rows = sorted.map((r, i) => [
       i+1,
-      r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`,
+      nameCellForOwner(r.owner_id, r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`),
       r?.settings?.wins ?? 0,
       r?.settings?.losses ?? 0,
       r?.settings?.fpts ?? 0,
@@ -647,7 +730,7 @@ async function openSeasonDetail(leagueId) {
   }
 }
 
-/* ---------- Previews: storage + generator (same as before) ---------- */
+/* ---------- Previews: storage + generator ---------- */
 function previewKey(week, matchupId) {
   const leagueId = LEAGUES[CURRENT_SEASON];
   return `sleeper_previews_${leagueId}_${week}_${matchupId}`;
@@ -709,14 +792,22 @@ function renderPreviews(week, groups, users, rosters) {
     const r = rosters.find(x => x.roster_id === rid) || {};
     return r?.settings?.team_name || userMap[r.owner_id] || `Roster ${rid}`;
   };
+  const ownerOfRoster = (rid) => (rosters.find(x=>x.roster_id===rid)||{}).owner_id;
 
   const cards = Object.entries(groups).map(([mid, arr]) => {
     if (arr.length !== 2) return '';
     const [a,b] = arr;
     const saved = loadPreview(week, mid);
+    const ownerA = ownerOfRoster(a.roster_id), ownerB = ownerOfRoster(b.roster_id);
+
     return `
       <div class="card preview-card" data-mid="${mid}">
-        <h3>Week ${week} • ${nameOfRoster(a.roster_id)} vs ${nameOfRoster(b.roster_id)}</h3>
+        <h3>
+          <span class="namecell">${nameCellForOwner(ownerA, nameOfRoster(a.roster_id), true)}</span>
+          <span class="muted"> vs </span>
+          <span class="namecell">${nameCellForOwner(ownerB, nameOfRoster(b.roster_id), true)}</span>
+          <span class="muted"> • Week ${week}</span>
+        </h3>
         <div class="preview-meta">
           <span class="pill">Matchup ID: ${mid}</span>
           <span>Team A PF: ${rosters.find(r=>r.roster_id===a.roster_id)?.settings?.fpts ?? 0}</span>
@@ -769,28 +860,30 @@ function downloadCSV(filename, rows, headers){
   const a = document.createElement("a"); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url);
 }
 
-function accumulate(obj, key, fn){ obj[key] = fn(obj[key] || 0); }
-
 async function computeAllTime() {
-  const years = [2025, 2024, 2023, 2022];
-  const agg = {}; // user_id -> stats
-  const nameSeen = {}; // user_id -> latest team name
+  const years = [2025, 2024, 2023, 2022, 2021];
+  const agg = {};
+  const nameSeen = {};
+
+  function addUser(uid, display) {
+    if (!agg[uid]) agg[uid] = { user_id: uid, display: display || uid, seasons: 0, wins:0, losses:0, pf:0, titles:0, finals:0, thirds:0 };
+  }
 
   for (const yr of years) {
-    const leagueId = LEAGUES[yr]; if (!leagueId) continue;
-    const { league, users, rosters, podium } = await fetchLeagueBundle(leagueId);
+    const lid = LEAGUES[yr] || (MANUAL[manualKey(yr)] ? manualKey(yr) : null);
+    if (!lid) continue;
+    const { league, users, rosters, podium } = await fetchLeagueBundle(lid);
 
-    const rosterToOwner = {}; rosters.forEach(r => { rosterToOwner[r.roster_id] = r.owner_id; });
-    const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
+    const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name || u.username || u.user_id);
+    const rosterToOwner = {}; rosters.forEach(r => rosterToOwner[r.roster_id] = r.owner_id);
 
-    // Regular season totals
     rosters.forEach(r => {
       const uid = r.owner_id; if (!uid) return;
       const wins = r?.settings?.wins ?? 0;
       const losses = r?.settings?.losses ?? 0;
       const pf = r?.settings?.fpts ?? 0;
 
-      if (!agg[uid]) agg[uid] = { user_id: uid, display: userMap[uid] || uid, seasons: 0, wins:0, losses:0, pf:0, titles:0, finals:0, thirds:0 };
+      addUser(uid, userMap[uid]);
       nameSeen[uid] = r?.settings?.team_name || userMap[uid] || `Manager ${uid}`;
       agg[uid].seasons += 1;
       agg[uid].wins += wins;
@@ -798,51 +891,40 @@ async function computeAllTime() {
       agg[uid].pf += pf;
     });
 
-    // Podium (titles / finals / third)
-    const champion = podium.champion != null ? rosterToOwner[podium.champion] : null;
-    const runner   = podium.runnerUp != null ? rosterToOwner[podium.runnerUp] : null;
-    const third    = podium.third != null ? rosterToOwner[podium.third] : null;
+    const champion = podium?.champion != null ? rosterToOwner[podium.champion] : null;
+    const runner   = podium?.runnerUp != null ? rosterToOwner[podium.runnerUp] : null;
+    const third    = podium?.third != null ? rosterToOwner[podium.third] : null;
     if (champion && agg[champion]) agg[champion].titles += 1;
     if (runner && agg[runner]) agg[runner].finals += 1;
     if (third && agg[third]) agg[third].thirds += 1;
   }
 
-  // Derive rates
   const arr = Object.values(agg).map(a => {
     const games = Math.max(1, a.wins + a.losses);
-    return {
-      ...a,
-      name: nameSeen[a.user_id] || a.display,
-      winpct: (a.wins / games),
-      pfpg: (a.pf / games)
-    };
+    return { ...a, name: nameSeen[a.user_id] || a.display, winpct: (a.wins / games), pfpg: (a.pf / games) };
   });
 
-  // Build normalized components
   const vec = (key) => arr.map(x => x[key] ?? 0);
+  const normalize = (xs) => { const min=Math.min(...xs), max=Math.max(...xs); if (!isFinite(min) || !isFinite(max) || min===max) return xs.map(_=>0.5); return xs.map(v=>(v-min)/(max-min)); };
   const nWins = normalize(vec('wins'));
   const nPF   = normalize(vec('pf'));
   const nWinP = normalize(vec('winpct'));
   const nPFPG = normalize(vec('pfpg'));
   const nTit  = normalize(vec('titles'));
   const nFin  = normalize(vec('finals'));
-
-  // Weights (tweak here)
   const W = { TITLES:0.25, PF:0.25, WINS:0.25, WINP:0.15, FINALS:0.05, PFPG:0.05 };
 
   arr.forEach((x,i) => {
     x.score = W.TITLES*nTit[i] + W.PF*nPF[i] + W.WINS*nWins[i] + W.WINP*nWinP[i] + W.FINALS*nFin[i] + W.PFPG*nPFPG[i];
   });
 
-  // Sort and return rows
   arr.sort((a,b)=> b.score - a.score);
   return arr;
 }
-
 function renderAllTimeTable(data) {
   const rows = data.map((x, idx) => [
     idx+1,
-    x.name,
+    nameCellForOwner(x.user_id, x.name),
     x.seasons,
     x.titles,
     x.finals,
@@ -858,13 +940,122 @@ function renderAllTimeTable(data) {
     rows
   );
 
-  // Wire CSV export
+  // CSV export
   el("#exportAllTimeBtn").onclick = () => {
-    downloadCSV("all_time_power.csv", rows, ["Rank","Manager/Team","Seasons","Titles","Finals","Wins","Losses","Win%","Total PF","PF/G","All-Time Score"]);
+    const plainRows = data.map((x, idx) => [
+      idx+1, x.name, x.seasons, x.titles, x.finals, x.wins, x.losses, (x.winpct*100).toFixed(1)+"%", Math.round(x.pf), x.pfpg.toFixed(1), (x.score*100).toFixed(1)
+    ]);
+    downloadCSV("all_time_power.csv", plainRows, ["Rank","Manager/Team","Seasons","Titles","Finals","Wins","Losses","Win%","Total PF","PF/G","All-Time Score"]);
   };
 }
 
-/* ---------- Events & Init ---------- */
+/* ---------- Rivalries (head-to-head across seasons) ---------- */
+let Rivalries = null; // { pairs: Map("uidA|uidB" -> {a:uidA,b:uidB, games:[{a_uid,b_uid,a_pts,b_pts,season,week}] }), users:Set(uid) }
+function pairKey(a,b){ return [String(a),String(b)].sort().join("|"); }
+async function fetchSeasonMatchupsAllWeeks(leagueId, rosters){
+  const result = [];
+  const teamIndex = new Map(); rosters.forEach(r => teamIndex.set(r.roster_id, r.owner_id));
+  for (let wk=1; wk<=18; wk++){
+    try {
+      const arr = await fetchJson(`/league/${leagueId}/matchups/${wk}`);
+      const groups = {};
+      arr.forEach(x => { const id = x.matchup_id ?? `solo-${x.roster_id}`; (groups[id] ||= []).push(x); });
+      Object.values(groups).forEach(g => {
+        if (g.length !== 2) return;
+        const [a,b] = g;
+        const a_uid = teamIndex.get(a.roster_id), b_uid = teamIndex.get(b.roster_id);
+        if (!a_uid || !b_uid || a_uid===b_uid) return;
+        result.push({ a_uid, b_uid, a_pts: +(a.points||0), b_pts: +(b.points||0), week:wk });
+      });
+    } catch {}
+  }
+  return result;
+}
+async function ensureRivalriesComputed(){
+  if (Rivalries) return;
+  const years = [2025, 2024, 2023, 2022, 2021];
+  const pairs = new Map(); const usersSet = new Set();
+
+  for (const yr of years){
+    const lid = LEAGUES[yr] || (MANUAL[manualKey(yr)] ? manualKey(yr) : null);
+    if (!lid) continue;
+    const { league, users, rosters, podium } = await fetchLeagueBundle(lid);
+    (users||[]).forEach(u=> usersSet.add(u.user_id));
+
+    if (isManualLeagueId(lid)) {
+      // Manual (ESPN 2021) — we have matchups in bundle
+      const teamIndex = new Map(); rosters.forEach(r => teamIndex.set(r.roster_id, r.owner_id));
+      const m = (MANUAL[manualKey(yr)]?.matchups)||[];
+      const byId = {};
+      m.forEach(row => { (byId[row.matchup_id] ||= []).push(row); });
+      Object.values(byId).forEach(g => {
+        if (g.length !== 2) return; const [a,b] = g;
+        const a_uid = teamIndex.get(a.roster_id), b_uid = teamIndex.get(b.roster_id); if (!a_uid||!b_uid||a_uid===b_uid) return;
+        const key = pairKey(a_uid,b_uid);
+        const bucket = pairs.get(key) || { a:a_uid, b:b_uid, games:[] };
+        bucket.games.push({ a_uid, b_uid, a_pts:+(a.points||0), b_pts:+(b.points||0), season:yr, week:a.week });
+        pairs.set(key, bucket);
+      });
+    } else {
+      // Sleeper seasons: fetch all weeks
+      const matchList = await fetchSeasonMatchupsAllWeeks(lid, rosters);
+      matchList.forEach(g => {
+        const key = pairKey(g.a_uid, g.b_uid);
+        const bucket = pairs.get(key) || { a:g.a_uid, b:g.b_uid, games:[] };
+        bucket.games.push({ ...g, season: yr });
+        pairs.set(key, bucket);
+      });
+    }
+  }
+
+  Rivalries = { pairs, users: usersSet };
+  // Build selector
+  const options = Array.from(Profiles.keys()).filter(uid => Rivalries.users.has(uid));
+  options.sort((u1,u2)=> {
+    const n1=(Profiles.get(u1)?.name||u1).toLowerCase();
+    const n2=(Profiles.get(u2)?.name||u2).toLowerCase();
+    return n1.localeCompare(n2);
+  });
+  rivalSelect.innerHTML = `<option value="">Select a manager…</option>` + options.map(uid => `<option value="${uid}">${esc(Profiles.get(uid)?.name || uid)}</option>`).join("");
+}
+function renderRivalriesFor(uid){
+  if (!uid || !Rivalries) { rivalWrap.innerHTML = `<div class="muted">Select a manager to see head-to-head records.</div>`; return; }
+  const rows = [];
+  const seenOpp = new Map(); // opp -> stats
+
+  Rivalries.pairs.forEach(bucket => {
+    const { a, b, games } = bucket;
+    if (a !== uid && b !== uid) return;
+    const opp = (a === uid) ? b : a;
+    let w=0,l=0,t=0, pf=0, pa=0, meetings=0;
+    games.forEach(g => {
+      const myPts = (g.a_uid === uid) ? g.a_pts : g.b_pts;
+      const opPts = (g.a_uid === uid) ? g.b_pts : g.a_pts;
+      pf += myPts; pa += opPts; meetings++;
+      if (myPts > opPts) w++; else if (myPts < opPts) l++; else t++;
+    });
+    const stat = seenOpp.get(opp) || { w:0,l:0,t:0,pf:0,pa:0,meetings:0 };
+    stat.w += w; stat.l += l; stat.t += t; stat.pf += pf; stat.pa += pa; stat.meetings += meetings;
+    seenOpp.set(opp, stat);
+  });
+
+  const arr = Array.from(seenOpp.entries()).map(([opp, s]) => ({
+    opp, ...s, diff: s.pf - s.pa, pct: s.meetings ? s.w / s.meetings : 0
+  })).sort((a,b)=> b.pct - a.pct || b.diff - a.diff || b.pf - a.pf);
+
+  const rowsHtml = arr.map(x => [
+    nameCellForOwner(x.opp, Profiles.get(x.opp)?.name || x.opp),
+    `${x.w}-${x.l}${x.t?'-'+x.t:''}`,
+    x.meetings,
+    Math.round(x.pf),
+    Math.round(x.pa),
+    (x.diff>=0?'+':'')+Math.round(x.diff),
+    (x.pct*100).toFixed(1)+'%'
+  ]);
+  rivalWrap.innerHTML = table(["Opponent","W-L(-T)","Games","PF","PA","Diff","Win%"], rowsHtml);
+}
+
+/* ---------- Events ---------- */
 el("#autoWeekBtn").addEventListener("click", getCurrentWeek);
 el("#loadBtn").addEventListener("click", loadCurrentLeague);
 el("#matchupsBtn").addEventListener("click", async () => {
@@ -896,8 +1087,6 @@ el("#genAllBtn").addEventListener("click", async () => {
     } catch (e) { ta.value = `Could not generate: ${e.message}`; }
   }
 });
-
-// All-Time compute/refresh
 el("#refreshAllTimeBtn").addEventListener("click", async () => {
   allTimeWrap.textContent = "Computing…";
   try {
@@ -907,9 +1096,139 @@ el("#refreshAllTimeBtn").addEventListener("click", async () => {
     allTimeWrap.textContent = "Error: " + e.message;
   }
 });
+el("#refreshRivalsBtn").addEventListener("click", async () => {
+  Rivalries = null;
+  rivalWrap.textContent = "Recomputing…";
+  await ensureRivalriesComputed();
+  renderRivalriesFor(rivalSelect.value);
+});
+rivalSelect.addEventListener("change", () => renderRivalriesFor(rivalSelect.value));
 
-getCurrentWeek();
-loadCurrentLeague();
+/* ===================== ESPN 2021 Auto-Import (Public League: 755639) ===================== */
+const ESPN_PUBLIC_2021_LEAGUE_ID = 755639;
+const ESPN_2021_CACHE_KEY = "espn_ffl_2021_bundle_v1";
+window.MANUAL = window.MANUAL || {};
+function manualKey(year){ return `manual-${year}`; }
+function isManualLeagueId(id){ return typeof id === "string" && id.startsWith("manual-"); }
+
+/* wrap fetchLeagueBundle to support manual seasons */
+const _orig_fetchLeagueBundle = fetchLeagueBundle;
+fetchLeagueBundle = async function(leagueId) {
+  if (isManualLeagueId(leagueId)) {
+    const bundle = MANUAL[leagueId];
+    if (!bundle) throw new Error(`Manual season not loaded: ${leagueId}`);
+    // register profiles
+    registerProfilesFromManual(bundle.users);
+    return {
+      league: { season: String(bundle.season), name: bundle.league?.name || "Manual League", total_rosters: bundle.league?.total_rosters ?? (bundle.rosters?.length || 0) },
+      users: bundle.users || [],
+      rosters: (bundle.rosters || []).map(r => ({
+        roster_id: r.roster_id,
+        owner_id: r.owner_id,
+        settings: {
+          team_name: r.team_name, wins: r.wins ?? 0, losses: r.losses ?? 0,
+          fpts: r.fpts ?? 0, fpts_against: r.fpts_against ?? 0
+        },
+        metadata: { streak: r.streak || "" }
+      })),
+      podium: bundle._podium || { champion:null, runnerUp:null, third:null }
+    };
+  }
+  return _orig_fetchLeagueBundle(leagueId);
+};
+
+async function importESPN2021Public(espnLeagueId = ESPN_PUBLIC_2021_LEAGUE_ID) {
+  // 1) cache?
+  const cached = localStorage.getItem(ESPN_2021_CACHE_KEY);
+  if (cached) {
+    try {
+      const bundle = JSON.parse(cached);
+      MANUAL[manualKey(2021)] = bundle;
+      LEAGUES[2021] = manualKey(2021);
+      registerProfilesFromManual(bundle.users);
+      return;
+    } catch(_) {}
+  }
+  // 2) fetch
+  const url = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/2021/segments/0/leagues/${espnLeagueId}?view=mTeam&view=mRoster&view=mMatchup&view=mSettings`;
+  const res = await fetch(url, { headers: { "Accept": "application/json" } });
+  if (!res.ok) throw new Error(`ESPN HTTP ${res.status}`);
+  const data = await res.json();
+
+  const teams = data.teams || [];
+  const users = [], rosters = []; const seen = new Set();
+  const tName = t => (`${(t.location||"").trim()} ${(t.nickname||"").trim()}`.trim() || t.abbrev || `Team ${t.id}`);
+  const tLogo = t => (t.logo||"").trim();
+  const tRec  = t => {
+    const rec = t.record || {}, o = rec.overall || {};
+    return { w:+(o.wins||0), l:+(o.losses||0), pf:+(o.pointsFor||0), pa:+(o.pointsAgainst||0) };
+  };
+  const owner = t => (t.owners && t.owners[0]) || `unknown_${t.id}`;
+
+  teams.forEach(t => {
+    const uid = owner(t);
+    if (!seen.has(uid)) {
+      users.push({ user_id: uid, display_name: tName(t), avatar_url: tLogo(t) });
+      seen.add(uid);
+    }
+    const r = tRec(t);
+    rosters.push({ roster_id: t.id, owner_id: uid, team_name: tName(t), wins: r.w, losses: r.l, fpts: +r.pf.toFixed(2), fpts_against: +r.pa.toFixed(2), streak: "" });
+  });
+
+  const schedule = data.schedule || [];
+  const matchups = [], winners = []; let mid = 1, bid = 1000;
+  schedule.forEach(s => {
+    const h = s.home||{}, a = s.away||{};
+    const hId = h.teamId, aId = a.teamId; if (hId==null || aId==null) return;
+    const week = s.matchupPeriodId; if (week==null) return;
+    const hPts = +(h.totalPoints||0), aPts = +(a.totalPoints||0);
+    matchups.push({ week, matchup_id: mid, roster_id: hId, points: hPts });
+    matchups.push({ week, matchup_id: mid, roster_id: aId, points: aPts });
+    const tier = s.playoffTierType;
+    if (tier && /WINNERS|CHAMPIONSHIP/i.test(tier)) {
+      const winnerSide = s.winner; let wRid = null;
+      if (winnerSide === "HOME") wRid = hId; else if (winnerSide === "AWAY") wRid = aId; else wRid = (hPts >= aPts) ? hId : aId;
+      winners.push({ round: week, matchup_id: bid, roster_id_1: hId, roster_id_2: aId, t1_points: hPts, t2_points: aPts, winner_roster_id: wRid });
+      bid++;
+    }
+    mid++;
+  });
+
+  const podium = (() => {
+    if (!winners.length) return { champion:null, runnerUp:null, third:null };
+    const maxR = Math.max(...winners.map(x=> +x.round || 0));
+    const finals = winners.filter(x => +x.round === maxR);
+    const f = finals[0];
+    let champion = f?.winner_roster_id ?? null;
+    let runnerUp = f ? (champion === f.roster_id_1 ? f.roster_id_2 : f.roster_id_1) : null;
+    let third = null;
+    if (finals.length > 1) { const other = finals.find(x => x !== f); if (other) third = other.winner_roster_id ?? null; }
+    return { champion, runnerUp, third };
+  })();
+
+  const bundle = {
+    season: 2021,
+    league: { name: data?.settings?.name || `ESPN League ${espnLeagueId}`, total_rosters: teams.length },
+    users, rosters, matchups, winners_bracket: winners,
+    _podium: { champion: podium.champion, runnerUp: podium.runnerUp, third: podium.third }
+  };
+
+  localStorage.setItem(ESPN_2021_CACHE_KEY, JSON.stringify(bundle));
+  MANUAL[manualKey(2021)] = bundle;
+  LEAGUES[2021] = manualKey(2021);
+  registerProfilesFromManual(users);
+}
+
+/* --- BOOTSTRAP: auto-import 2021, then normal init --- */
+(async () => {
+  try { await importESPN2021Public(); } catch (e) { console.warn("ESPN 2021 import failed:", e); }
+  finally {
+    getCurrentWeek();
+    loadCurrentLeague();
+    // precompute all-time table once
+    computeAllTime().then(renderAllTimeTable).catch(()=>{});
+  }
+})();
 </script>
 </body>
 </html>
