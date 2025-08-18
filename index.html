@@ -59,7 +59,6 @@
   .link { color: var(--accent-2); text-decoration: underline; cursor: pointer; }
   canvas { max-height: 360px; }
 
-  /* Avatars + name cells */
   .namecell { display:flex; align-items:center; gap:8px; }
   .avatar { width:22px; height:22px; border-radius:50%; object-fit:cover; display:inline-block; }
   .avatar-sm { width:18px; height:18px; border-radius:50%; object-fit:cover; }
@@ -405,7 +404,8 @@ async function computePower(leagueId, rosters, recentWindow = 3, currentWeek = N
       Object.values(groups).forEach(([a, b]) => {
         if (!a || !b) return;
         const ia = teamIndex.get(String(a.roster_id));
-        const ib = teamIndex.get(String(b.roster_id));
+        the_ib = teamIndex.get(String(b.roster_id));
+        const ib = the_ib;
         if (ia == null || ib == null) return;
         recentPFperTeam[ia] += (a.points ?? 0);
         recentPFperTeam[ib] += (b.points ?? 0);
@@ -480,7 +480,59 @@ function buildClassicStandings(users, rosters) {
   return table(["Rank","Team","W","L","PF","PA","Avg PF/G"], rows);
 }
 
-/* ---------- Sleeper & Manual league bundle helpers ---------- */
+/* ---------- Seasons summary & detail ---------- */
+function teamsFromMatch(m) { return [m.roster_id_1 ?? m.team1 ?? m.t1 ?? null, m.roster_id_2 ?? m.team2 ?? m.t2 ?? null]; }
+function pointsFromMatch(m) { return [m.t1_points ?? m.points1 ?? m.score1 ?? null, m.t2_points ?? m.points2 ?? m.score2 ?? null]; }
+function winnerFromMatch(m) {
+  const wf = ['winner_roster_id','w','winner'].find(k => k in m); if (wf && m[wf] != null) return m[wf];
+  const [t1,t2] = teamsFromMatch(m), [p1,p2] = pointsFromMatch(m);
+  if (t1 != null && t2 != null && p1 != null && p2 != null) return Number(p1) === Number(p2) ? t1 : (Number(p1) > Number(p2) ? t1 : t2);
+  return null;
+}
+function podiumFromBracket(bracket) {
+  if (!Array.isArray(bracket) || bracket.length === 0) return { champion:null, runnerUp:null, third:null };
+  const rKey = ['round','r','bracket_round','matchupPeriodId'].find(k => bracket.some(x => k in x)) || 'round';
+  const maxRound = Math.max(...bracket.map(m => Number(m[rKey] ?? 0)));
+  const finals = bracket.filter(m => Number(m[rKey] ?? 0) === maxRound);
+
+  const getTeams = m => [m.roster_id_1 ?? m.team1 ?? m.t1 ?? null, m.roster_id_2 ?? m.team2 ?? m.t2 ?? null];
+  const getPoints = m => [m.t1_points ?? m.points1 ?? m.score1 ?? null, m.t2_points ?? m.points2 ?? m.score2 ?? null];
+  const explicitWinner = m => m.winner_roster_id ?? m.w ?? m.winner ?? null;
+
+  let f = finals.find(m => getTeams(m).every(Boolean) && (explicitWinner(m) != null || getPoints(m).every(v => v != null))) || finals[0];
+  if (!f) return { champion:null, runnerUp:null, third:null };
+
+  let champ = explicitWinner(f);
+  if (champ == null) {
+    const [p1,p2] = getPoints(f).map(Number);
+    const [t1,t2] = getTeams(f);
+    if (p1 != null && p2 != null && t1 != null && t2 != null) {
+      champ = (p1 >= p2) ? t1 : t2;
+    }
+  }
+  const [t1,t2] = getTeams(f);
+  const runner = (champ != null && t1 != null && t2 != null) ? (String(champ) === String(t1) ? t2 : t1) : null;
+
+  let third = null;
+  const other = finals.find(x => x !== f && getTeams(x).every(Boolean));
+  if (other) {
+    const ew = explicitWinner(other);
+    if (ew != null) third = ew;
+    else {
+      const [op1,op2] = getPoints(other).map(Number);
+      const [ot1,ot2] = getTeams(other);
+      if (op1 != null && op2 != null && ot1 != null && ot2 != null) {
+        third = (op1 >= op2) ? ot1 : ot2;
+      }
+    }
+  }
+  return { champion: champ ?? null, runnerUp: runner ?? null, third };
+}
+function rosterNameFromId(rosters, users, rosterId) {
+  const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
+  const r = rosters.find(x => String(x.roster_id) === String(rosterId));
+  return r ? (r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`) : null;
+}
 async function fetchLeagueBundleSleeper(leagueId){
   const league = await fetchJson(`/league/${leagueId}`);
   const [users, rosters] = await Promise.all([
@@ -496,29 +548,6 @@ async function fetchLeagueBundleSleeper(leagueId){
   return { league, users, rosters, podium };
 }
 async function fetchLeagueBundle(leagueId) { return fetchLeagueBundleSleeper(leagueId); }
-
-/* ---------- Seasons summary & detail ---------- */
-function teamsFromMatch(m) { return [m.t1 ?? m.team1 ?? m.roster_id_1 ?? null, m.t2 ?? m.team2 ?? m.roster_id_2 ?? null]; }
-function pointsFromMatch(m) { return [m.t1_points ?? m.p1 ?? m.points1 ?? m.score1 ?? null, m.t2_points ?? m.p2 ?? m.points2 ?? m.score2 ?? null]; }
-function winnerFromMatch(m) {
-  const wf = ['w','winner'].find(k => k in m); if (wf && m[wf] != null) return m[wf];
-  const [t1,t2] = teamsFromMatch(m), [p1,p2] = pointsFromMatch(m);
-  if (t1 != null && t2 != null && p1 != null && p2 != null) return Number(p1) === Number(p2) ? t1 : (Number(p1) > Number(p2) ? t1 : t2);
-  return null;
-}
-function podiumFromBracket(bracket) {
-  if (!Array.isArray(bracket) || bracket.length === 0) return { champion:null, runnerUp:null, third:null };
-  const rKey = ['r','round','bracket_round'].find(k => bracket.some(x => k in x)) || 'r';
-  const maxRound = Math.max(...bracket.map(m => Number(m[rKey] ?? 0)));
-  const inFinalRound = bracket.filter(m => Number(m[rKey] ?? 0) === maxRound);
-  let finals = inFinalRound.find(m => teamsFromMatch(m).every(Boolean) && winnerFromMatch(m) != null) || inFinalRound[0];
-  const champ = winnerFromMatch(finals);
-  const [f1, f2] = teamsFromMatch(finals);
-  const runner = champ != null && f1 != null && f2 != null ? (String(champ) === String(f1) ? f2 : f1) : null;
-  let third = null; const other = inFinalRound.find(m => m !== finals && teamsFromMatch(m).every(Boolean));
-  if (other) { const thirdWinner = winnerFromMatch(other); if (thirdWinner != null) third = thirdWinner; }
-  return { champion: champ, runnerUp: runner, third };
-}
 async function summarizeLeagueById(leagueId) {
   const { league, users, rosters, podium } = await fetchLeagueBundle(leagueId);
   const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
@@ -530,7 +559,7 @@ async function summarizeLeagueById(leagueId) {
   function rosterNameFromIdLocal(rosterId){
     const r = rosters.find(x=> String(x.roster_id)===String(rosterId));
     return r ? (r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`) : null;
-    }
+  }
 
   return {
     season: league.season,
@@ -621,11 +650,6 @@ async function openSeasonDetail(leagueId) {
     seasonMeta.textContent = `Error loading season: ${e.message}`;
     seasonStandings.innerHTML = "";
   }
-}
-function rosterNameFromId(rosters, users, rosterId) {
-  const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
-  const r = rosters.find(x => String(x.roster_id) === String(rosterId));
-  return r ? (r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`) : null;
 }
 
 /* ---------- Current (2025) league → dashboard ---------- */
@@ -722,7 +746,6 @@ async function loadMatchups() {
 
     renderWeekBar(rows);
 
-    // Build previews list (with avatars in headers)
     renderPreviews(week, groups, users, rosters);
 
   } catch (err) {
@@ -731,7 +754,7 @@ async function loadMatchups() {
   }
 }
 
-/* ---------- Previews: storage + generator ---------- */
+/* ---------- Previews: storage + generator + import/export ---------- */
 function previewKey(week, matchupId) {
   const leagueId = LEAGUES[CURRENT_SEASON];
   return `sleeper_previews_${leagueId}_${week}_${matchupId}`;
@@ -830,7 +853,8 @@ function renderPreviews(week, groups, users, rosters) {
     const ta = card.querySelector('textarea.preview');
 
     genBtn.addEventListener('click', async () => {
-      const arr = groups[mid]; if (!arr || arr.length !== 2) return;
+      const arr = (function(){ return groups[mid]; })();
+      if (!arr || arr.length !== 2) return;
       const [a,b] = arr;
       ta.value = "Generating…";
       try {
@@ -851,6 +875,39 @@ function renderPreviews(week, groups, users, rosters) {
     });
   });
 }
+// Export/Import previews JSON
+el("#exportBtn").addEventListener("click", () => {
+  const leagueId = LEAGUES[CURRENT_SEASON];
+  const prefix = `sleeper_previews_${leagueId}_`;
+  const obj = {};
+  for (let i=0; i<localStorage.length; i++){
+    const k = localStorage.key(i);
+    if (k.startsWith(prefix)) {
+      const parts = k.slice(prefix.length).split("_");
+      const week = parts[0], mid = parts.slice(1).join("_");
+      obj[week] ||= {};
+      obj[week][mid] = localStorage.getItem(k);
+    }
+  }
+  const blob = new Blob([JSON.stringify(obj, null, 2)], {type:"application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = "previews.json"; a.click(); URL.revokeObjectURL(url);
+});
+el("#importBtn").addEventListener("click", () => importFile.click());
+importFile.addEventListener("change", async (e) => {
+  const f = e.target.files?.[0]; if (!f) return;
+  const txt = await f.text();
+  try {
+    const data = JSON.parse(txt);
+    const leagueId = LEAGUES[CURRENT_SEASON];
+    Object.entries(data).forEach(([week, m]) => {
+      Object.entries(m).forEach(([mid, text]) => {
+        localStorage.setItem(`sleeper_previews_${leagueId}_${week}_${mid}`, text || "");
+      });
+    });
+    alert("Previews imported.");
+  } catch (err) { alert("Invalid JSON: "+err.message); }
+});
 
 /* ---------- ALL-TIME RANKINGS ---------- */
 function csvEscape(v){ if (v==null) return ""; const s=String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; }
@@ -871,12 +928,12 @@ async function computeAllTime() {
   for (const yr of years) {
     const lid = LEAGUES[yr] || (MANUAL[manualKey(yr)] ? manualKey(yr) : null);
     if (!lid) continue;
-    const { league, users, rosters, podium } = await fetchLeagueBundle(lid);
+    const { users, rosters, podium } = await fetchLeagueBundle(lid);
 
-    const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name || u.username || u.user_id);
-    const rosterToOwner = {}; rosters.forEach(r => rosterToOwner[r.roster_id] = r.owner_id);
+    const userMap = {}; (users||[]).forEach(u => userMap[u.user_id] = u.display_name || u.username || u.user_id);
+    const rosterToOwner = {}; (rosters||[]).forEach(r => rosterToOwner[r.roster_id] = r.owner_id);
 
-    rosters.forEach(r => {
+    (rosters||[]).forEach(r => {
       const uid = r.owner_id; if (!uid) return;
       const wins = r?.settings?.wins ?? 0;
       const losses = r?.settings?.losses ?? 0;
@@ -977,7 +1034,7 @@ async function ensureRivalriesComputed(){
   for (const yr of years){
     const lid = LEAGUES[yr] || (MANUAL[manualKey(yr)] ? manualKey(yr) : null);
     if (!lid) continue;
-    const { league, users, rosters } = await fetchLeagueBundle(lid);
+    const { users, rosters } = await fetchLeagueBundle(lid);
     (users||[]).forEach(u=> usersSet.add(u.user_id));
 
     if (isManualLeagueId(lid)) {
@@ -1007,7 +1064,6 @@ async function ensureRivalriesComputed(){
   }
 
   Rivalries = { pairs, users: usersSet };
-  // Build selector
   const options = Array.from(Profiles.keys()).filter(uid => Rivalries.users.has(uid));
   options.sort((u1,u2)=> {
     const n1=(Profiles.get(u1)?.name||u1).toLowerCase();
@@ -1018,8 +1074,7 @@ async function ensureRivalriesComputed(){
 }
 function renderRivalriesFor(uid){
   if (!uid || !Rivalries) { rivalWrap.innerHTML = `<div class="muted">Select a manager to see head-to-head records.</div>`; return; }
-  const rows = [];
-  const seenOpp = new Map(); // opp -> stats
+  const seenOpp = new Map();
 
   Rivalries.pairs.forEach(bucket => {
     const { a, b, games } = bucket;
@@ -1098,14 +1153,173 @@ el("#refreshRivalsBtn").addEventListener("click", async () => {
 });
 rivalSelect.addEventListener("change", () => renderRivalriesFor(rivalSelect.value));
 
-/* ===================== ESPN 2021 Auto-Import with File Seed Fallback ===================== */
+/* ===================== ESPN 2021 Owner Mapping (ESPN -> Sleeper) ===================== */
+// Fill with known mappings. Keys = ESPN owner IDs (from 2021 JSON). Values = Sleeper user_ids.
+const OWNER_ID_MAP_2021 = {
+  // "espn_owner_id_here": "sleeper_user_id_here"
+};
+function normName(s){ return String(s||"").trim().toLowerCase().replace(/\s+/g,' '); }
+async function buildAutoMapFromSleeper(existingSeasons = [2025, 2024, 2023, 2022]) {
+  const nameToSleeper = new Map();
+  for (const yr of existingSeasons) {
+    const lid = LEAGUES[yr];
+    if (!lid) continue;
+    try {
+      const users = await fetchJson(`/league/${lid}/users`);
+      users.forEach(u => {
+        const nm = normName(u.display_name || u.username || u.user_id);
+        if (nm && !nameToSleeper.has(nm)) nameToSleeper.set(nm, u.user_id);
+      });
+    } catch {}
+  }
+  return nameToSleeper;
+}
+async function applyOwnerMap2021(esUsers, esRosters) {
+  const autoMap = await buildAutoMapFromSleeper();
+  const idMap = new Map();
+
+  Object.entries(OWNER_ID_MAP_2021).forEach(([espn, sleeper]) => idMap.set(String(espn), String(sleeper)));
+  esUsers.forEach(u => {
+    const espnId = String(u.user_id);
+    if (idMap.has(espnId)) return;
+    const nm = normName(u.display_name);
+    const sleeperId = autoMap.get(nm);
+    if (sleeperId) idMap.set(espnId, sleeperId);
+  });
+
+  const mergedUsers = new Map(); // sleeperId -> profile
+  const remappedRosters = esRosters.map(r => {
+    const source = String(r.owner_id);
+    const target = idMap.get(source) || source;
+    const u = esUsers.find(x => String(x.user_id) === source);
+    const disp = (u?.display_name) || (`Manager ${target}`);
+    const av = u?.avatar_url || null;
+    const prof = Profiles.get(target);
+    const finalName = prof?.name || disp;
+    const finalAvatar = prof?.avatar || av;
+
+    if (!mergedUsers.has(target)) {
+      mergedUsers.set(target, { user_id: target, display_name: finalName, avatar_url: finalAvatar });
+    } else {
+      const prev = mergedUsers.get(target);
+      mergedUsers.set(target, {
+        user_id: target,
+        display_name: prev.display_name || finalName,
+        avatar_url: prev.avatar_url || finalAvatar
+      });
+    }
+
+    return { ...r, owner_id: target, team_name: r.team_name };
+  });
+
+  const remappedUsers = Array.from(mergedUsers.values());
+  registerProfilesFromManual(remappedUsers);
+  return { users: remappedUsers, rosters: remappedRosters };
+}
+
+/* ===================== ESPN 2021: build bundle helper ===================== */
+async function buildManualBundleFromESPN(data, seasonYear = 2021, fallbackLeagueName = "ESPN League 755639") {
+  const teams = data.teams || [];
+  const rawUsers = [];
+  const rawRosters = [];
+  const seen = new Set();
+
+  const tName = t => (`${(t.location||"").trim()} ${(t.nickname||"").trim()}`.trim() || t.abbrev || `Team ${t.id}`);
+  const tLogo = t => (t.logo||"").trim();
+  const tRec  = t => {
+    const rec = t.record || {}, o = rec.overall || {};
+    return { w:+(o.wins||0), l:+(o.losses||0), pf:+(o.pointsFor||0), pa:+(o.pointsAgainst||0) };
+  };
+  const owner = t => (t.owners && t.owners[0]) || `unknown_${t.id}`;
+
+  teams.forEach(t => {
+    const uid = owner(t);
+    if (!seen.has(uid)) {
+      rawUsers.push({ user_id: String(uid), display_name: tName(t), avatar_url: tLogo(t) });
+      seen.add(uid);
+    }
+    const r = tRec(t);
+    rawRosters.push({
+      roster_id: t.id,
+      owner_id: String(uid),
+      team_name: tName(t),
+      wins: r.w, losses: r.l,
+      fpts: +r.pf.toFixed(2),
+      fpts_against: +r.pa.toFixed(2),
+      streak: ""
+    });
+  });
+
+  const { users, rosters } = await applyOwnerMap2021(rawUsers, rawRosters);
+
+  const schedule = data.schedule || [];
+  const matchups = [];
+  const winners = [];
+  let mid = 1, bid = 1000;
+
+  schedule.forEach(s => {
+    const h = s.home||{}, a = s.away||{};
+    const hId = h.teamId, aId = a.teamId; if (hId==null || aId==null) return;
+    const week = s.matchupPeriodId; if (week==null) return;
+    const hPts = +(h.totalPoints||0), aPts = +(a.totalPoints||0);
+
+    matchups.push({ week, matchup_id: mid, roster_id: hId, points: hPts });
+    matchups.push({ week, matchup_id: mid, roster_id: aId, points: aPts });
+
+    const playoffish = !!(s.playoffTierType || (s.matchupType && /CHAMP|PLAYOFF/i.test(s.matchupType)));
+    if (playoffish) {
+      const winnerSide = s.winner; let wRid = null;
+      if (winnerSide === "HOME") wRid = hId;
+      else if (winnerSide === "AWAY") wRid = aId;
+      else wRid = (hPts >= aPts) ? hId : aId;
+      winners.push({
+        round: week, matchup_id: bid,
+        roster_id_1: hId, roster_id_2: aId,
+        t1_points: hPts, t2_points: aPts,
+        winner_roster_id: wRid
+      });
+      bid++;
+    }
+    mid++;
+  });
+
+  let podium;
+  if (!winners.length) {
+    const lastWeek = Math.max(0, ...schedule.map(s => +s.matchupPeriodId || 0));
+    const lastGames = schedule.filter(s => +s.matchupPeriodId === lastWeek);
+    if (lastGames.length) {
+      const best = lastGames.reduce((acc, s) => {
+        const tot = +(s.home?.totalPoints||0) + +(s.away?.totalPoints||0);
+        return (!acc || tot > acc.tot) ? { s, tot } : acc;
+      }, null);
+      if (best) {
+        const s = best.s, hId = s.home.teamId, aId = s.away.teamId;
+        const hPts = +(s.home.totalPoints||0), aPts = +(s.away.totalPoints||0);
+        const champ = (hPts >= aPts) ? hId : aId;
+        const runner = (champ === hId) ? aId : hId;
+        podium = { champion: champ, runnerUp: runner, third: null };
+      }
+    }
+  }
+  if (!podium) podium = podiumFromBracket(winners);
+
+  const leagueName = data?.settings?.name || fallbackLeagueName;
+  return {
+    season: seasonYear,
+    league: { name: leagueName, total_rosters: teams.length },
+    users, rosters, matchups, winners_bracket: winners,
+    _podium: { champion: podium.champion ?? null, runnerUp: podium.runnerUp ?? null, third: podium.third ?? null }
+  };
+}
+
+/* ===================== Manual season plumbing ===================== */
 const ESPN_PUBLIC_2021_LEAGUE_ID = 755639;
 const ESPN_2021_CACHE_KEY = "espn_ffl_2021_bundle_v1";
 window.MANUAL = window.MANUAL || {};
 function manualKey(year){ return `manual-${year}`; }
 function isManualLeagueId(id){ return typeof id === "string" && id.startsWith("manual-"); }
 
-/* Enhance fetchLeagueBundle to support manual seasons */
+/* Hook fetchLeagueBundle to support manual seasons */
 const _orig_fetchLeagueBundle = fetchLeagueBundle;
 fetchLeagueBundle = async function(leagueId) {
   if (isManualLeagueId(leagueId)) {
@@ -1136,70 +1350,14 @@ async function seedESPN2021FromFile(file) {
   const text = await file.text();
   const data = JSON.parse(text);
 
-  const teams = data.teams || [];
-  const users = [], rosters = []; const seen = new Set();
-  const tName = t => (`${(t.location||"").trim()} ${(t.nickname||"").trim()}`.trim() || t.abbrev || `Team ${t.id}`);
-  const tLogo = t => (t.logo||"").trim();
-  const tRec  = t => {
-    const rec = t.record || {}, o = rec.overall || {};
-    return { w:+(o.wins||0), l:+(o.losses||0), pf:+(o.pointsFor||0), pa:+(o.pointsAgainst||0) };
-  };
-  const owner = t => (t.owners && t.owners[0]) || `unknown_${t.id}`;
-
-  teams.forEach(t => {
-    const uid = owner(t);
-    if (!seen.has(uid)) { users.push({ user_id: uid, display_name: tName(t), avatar_url: tLogo(t) }); seen.add(uid); }
-    const r = tRec(t);
-    rosters.push({ roster_id: t.id, owner_id: uid, team_name: tName(t), wins: r.w, losses: r.l, fpts: +r.pf.toFixed(2), fpts_against: +r.pa.toFixed(2), streak: "" });
-  });
-
-  const schedule = data.schedule || [];
-  const matchups = [], winners = []; let mid = 1, bid = 1000;
-  schedule.forEach(s => {
-    const h = s.home||{}, a = s.away||{};
-    const hId = h.teamId, aId = a.teamId; if (hId==null || aId==null) return;
-    const week = s.matchupPeriodId; if (week==null) return;
-    const hPts = +(h.totalPoints||0), aPts = +(a.totalPoints||0);
-    matchups.push({ week, matchup_id: mid, roster_id: hId, points: hPts });
-    matchups.push({ week, matchup_id: mid, roster_id: aId, points: aPts });
-    const tier = s.playoffTierType;
-    if (tier && /WINNERS|CHAMPIONSHIP/i.test(tier)) {
-      const winnerSide = s.winner; let wRid = null;
-      if (winnerSide === "HOME") wRid = hId; else if (winnerSide === "AWAY") wRid = aId; else wRid = (hPts >= aPts) ? hId : aId;
-      winners.push({ round: week, matchup_id: bid, roster_id_1: hId, roster_id_2: aId, t1_points: hPts, t2_points: aPts, winner_roster_id: wRid });
-      bid++;
-    }
-    mid++;
-  });
-
-  const podium = (() => {
-    if (!winners.length) return { champion:null, runnerUp:null, third:null };
-    const maxR = Math.max(...winners.map(x=> +x.round || 0));
-    const finals = winners.filter(x => +x.round === maxR);
-    const f = finals[0];
-    let champion = f?.winner_roster_id ?? null;
-    let runnerUp = f ? (champion === f.roster_id_1 ? f.roster_id_2 : f.roster_id_1) : null;
-    let third = null;
-    if (finals.length > 1) { const other = finals.find(x => x !== f); if (other) third = other.winner_roster_id ?? null; }
-    return { champion, runnerUp, third };
-  })();
-
-  const bundle = {
-    season: 2021,
-    league: { name: data?.settings?.name || "ESPN League 755639", total_rosters: teams.length },
-    users, rosters, matchups, winners_bracket: winners,
-    _podium: { champion: podium.champion, runnerUp: podium.runnerUp, third: podium.third }
-  };
-
+  const bundle = await buildManualBundleFromESPN(data, 2021, "ESPN League 755639");
   localStorage.setItem(ESPN_2021_CACHE_KEY, JSON.stringify(bundle));
-  MANUAL[manualKey(2021)] = bundle;
-  LEAGUES[2021] = manualKey(2021);
-  registerProfilesFromManual(users);
+  MANUAL[manualKey(2021)] = bundle; LEAGUES[2021] = manualKey(2021);
+  registerProfilesFromManual(bundle.users);
 
-  // Refresh UI
   await loadSeasonsSummary();
-  const dataAT = await computeAllTime();
-  if (typeof renderAllTimeTable === "function") renderAllTimeTable(dataAT);
+  const at = await computeAllTime();
+  if (typeof renderAllTimeTable === "function") renderAllTimeTable(at);
 }
 // Wire seed button
 (function(){
@@ -1215,9 +1373,8 @@ async function seedESPN2021FromFile(file) {
   });
 })();
 
-/* Auto-imort ESPN 2021 (public). If fetch fails (CORS), show seed UI. Then init app. */
+/* Auto-import ESPN 2021 (public). If fetch fails (CORS), show seed UI. Then init app. */
 async function importESPN2021Public(espnLeagueId = ESPN_PUBLIC_2021_LEAGUE_ID) {
-  // Cache hit?
   const cached = localStorage.getItem(ESPN_2021_CACHE_KEY);
   if (cached) {
     try {
@@ -1225,76 +1382,20 @@ async function importESPN2021Public(espnLeagueId = ESPN_PUBLIC_2021_LEAGUE_ID) {
       MANUAL[manualKey(2021)] = bundle; LEAGUES[2021] = manualKey(2021);
       registerProfilesFromManual(bundle.users);
       return;
-    } catch(_) {}
+    } catch {}
   }
-  // Fetch from ESPN
   const url = `https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/2021/segments/0/leagues/${espnLeagueId}?view=mTeam&view=mRoster&view=mMatchup&view=mSettings`;
   const res = await fetch(url, { headers: { "Accept": "application/json" } });
   if (!res.ok) throw new Error(`ESPN HTTP ${res.status}`);
   const data = await res.json();
 
-  const teams = data.teams || [];
-  const users = [], rosters = []; const seen = new Set();
-  const tName = t => (`${(t.location||"").trim()} ${(t.nickname||"").trim()}`.trim() || t.abbrev || `Team ${t.id}`);
-  const tLogo = t => (t.logo||"").trim();
-  const tRec  = t => {
-    const rec = t.record || {}, o = rec.overall || {};
-    return { w:+(o.wins||0), l:+(o.losses||0), pf:+(o.pointsFor||0), pa:+(o.pointsAgainst||0) };
-  };
-  const owner = t => (t.owners && t.owners[0]) || `unknown_${t.id}`;
-
-  teams.forEach(t => {
-    const uid = owner(t);
-    if (!seen.has(uid)) { users.push({ user_id: uid, display_name: tName(t), avatar_url: tLogo(t) }); seen.add(uid); }
-    const r = tRec(t);
-    rosters.push({ roster_id: t.id, owner_id: uid, team_name: tName(t), wins: r.w, losses: r.l, fpts: +r.pf.toFixed(2), fpts_against: +r.pa.toFixed(2), streak: "" });
-  });
-
-  const schedule = data.schedule || [];
-  const matchups = [], winners = []; let mid = 1, bid = 1000;
-  schedule.forEach(s => {
-    const h = s.home||{}, a = s.away||{};
-    const hId = h.teamId, aId = a.teamId; if (hId==null || aId==null) return;
-    const week = s.matchupPeriodId; if (week==null) return;
-    const hPts = +(h.totalPoints||0), aPts = +(a.totalPoints||0);
-    matchups.push({ week, matchup_id: mid, roster_id: hId, points: hPts });
-    matchups.push({ week, matchup_id: mid, roster_id: aId, points: aPts });
-    const tier = s.playoffTierType;
-    if (tier && /WINNERS|CHAMPIONSHIP/i.test(tier)) {
-      const winnerSide = s.winner; let wRid = null;
-      if (winnerSide === "HOME") wRid = hId; else if (winnerSide === "AWAY") wRid = aId; else wRid = (hPts >= aPts) ? hId : aId;
-      winners.push({ round: week, matchup_id: bid, roster_id_1: hId, roster_id_2: aId, t1_points: hPts, t2_points: aPts, winner_roster_id: wRid });
-      bid++;
-    }
-    mid++;
-  });
-
-  const podium = (() => {
-    if (!winners.length) return { champion:null, runnerUp:null, third:null };
-    const maxR = Math.max(...winners.map(x=> +x.round || 0));
-    const finals = winners.filter(x => +x.round === maxR);
-    const f = finals[0];
-    let champion = f?.winner_roster_id ?? null;
-    let runnerUp = f ? (champion === f.roster_id_1 ? f.roster_id_2 : f.roster_id_1) : null;
-    let third = null;
-    if (finals.length > 1) { const other = finals.find(x => x !== f); if (other) third = other.winner_roster_id ?? null; }
-    return { champion, runnerUp, third };
-  })();
-
-  const bundle = {
-    season: 2021,
-    league: { name: data?.settings?.name || `ESPN League ${espnLeagueId}`, total_rosters: teams.length },
-    users, rosters, matchups, winners_bracket: winners,
-    _podium: { champion: podium.champion, runnerUp: podium.runnerUp, third: podium.third }
-  };
-
+  const bundle = await buildManualBundleFromESPN(data, 2021, `ESPN League ${espnLeagueId}`);
   localStorage.setItem(ESPN_2021_CACHE_KEY, JSON.stringify(bundle));
-  MANUAL[manualKey(2021)] = bundle;
-  LEAGUES[2021] = manualKey(2021);
-  registerProfilesFromManual(users);
+  MANUAL[manualKey(2021)] = bundle; LEAGUES[2021] = manualKey(2021);
+  registerProfilesFromManual(bundle.users);
 }
 
-/* --- BOOTSTRAP: try ESPN import; on failure show seed UI; then normal init --- */
+/* --- BOOTSTRAP --- */
 (async () => {
   try { await importESPN2021Public(); }
   catch (e) { console.warn("ESPN 2021 import failed (likely CORS):", e); showEspnSeedUI(); }
@@ -1304,6 +1405,9 @@ async function importESPN2021Public(espnLeagueId = ESPN_PUBLIC_2021_LEAGUE_ID) {
     computeAllTime().then(renderAllTimeTable).catch(()=>{});
   }
 })();
+
+/* ---------- Rival select hook ---------- */
+rivalSelect.addEventListener("change", () => renderRivalriesFor(rivalSelect.value));
 </script>
 </body>
 </html>
