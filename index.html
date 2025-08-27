@@ -1091,7 +1091,7 @@ function renderRivalriesFor(uid){
       const myPts = (g.a_uid === uid) ? g.a_pts : g.b_pts;
       const opPts = (g.a_uid === uid) ? g.b_pts : g.a_pts;
 
-      // treat tiny float differences as decisive, not ties
+/*       // treat tiny float differences as decisive, not ties
       if (nearlyEqual(myPts, opPts)) {
         // true tie only if *exact* equality within epsilon and BOTH non-null
         // If either side is missing, skip this game entirely (don’t count it)
@@ -1101,7 +1101,22 @@ function renderRivalriesFor(uid){
 
       // normal win/loss
       pf += myPts; pa += opPts; meetings++;
-      if (myPts > opPts) w++; else l++;
+      if (myPts > opPts) w++; else l++; */
+      
+      if (myPts == null || opPts == null) {
+      // skip incomplete games (don’t count)
+        return;
+      }
+
+      if (nearlyEqual(myPts, opPts)) {
+        t++;
+      } else if (myPts > opPts) {
+        w++;
+      } else {
+        l++;
+      }
+
+
     });
 
     const stat = seenOpp.get(opp) || { w:0,l:0,t:0,pf:0,pa:0,meetings:0 };
