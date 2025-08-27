@@ -1072,6 +1072,12 @@ async function ensureRivalriesComputed(){
   });
   rivalSelect.innerHTML = `<option value="">Select a manager…</option>` + options.map(uid => `<option value="${uid}">${esc(Profiles.get(uid)?.name || uid)}</option>`).join("");
 }
+
+function nearlyEqual(a, b, eps = 0.01) { // 0.01 pt tolerance
+  if (a == null || b == null) return false;
+  return Math.abs(Number(a) - Number(b)) < eps;
+}
+
 function renderRivalriesFor(uid){
   if (!uid || !Rivalries) { rivalWrap.innerHTML = `<div class="muted">Select a manager to see head-to-head records.</div>`; return; }
   const seenOpp = new Map();
@@ -1084,9 +1090,20 @@ function renderRivalriesFor(uid){
     games.forEach(g => {
       const myPts = (g.a_uid === uid) ? g.a_pts : g.b_pts;
       const opPts = (g.a_uid === uid) ? g.b_pts : g.a_pts;
+
+      // treat tiny float differences as decisive, not ties
+      if (nearlyEqual(myPts, opPts)) {
+        // true tie only if *exact* equality within epsilon and BOTH non-null
+        // If either side is missing, skip this game entirely (don’t count it)
+        if (myPts != null && opPts != null) { t++; pf += myPts; pa += opPts; meetings++; }
+        return;
+      }
+
+      // normal win/loss
       pf += myPts; pa += opPts; meetings++;
-      if (myPts > opPts) w++; else if (myPts < opPts) l++; else t++;
+      if (myPts > opPts) w++; else l++;
     });
+
     const stat = seenOpp.get(opp) || { w:0,l:0,t:0,pf:0,pa:0,meetings:0 };
     stat.w += w; stat.l += l; stat.t += t; stat.pf += pf; stat.pa += pa; stat.meetings += meetings;
     seenOpp.set(opp, stat);
@@ -1218,22 +1235,24 @@ async function applyOwnerMap2021(esUsers, esRosters) {
 }
 
 function espnExtractPoints(side) {
-  // 1) direct total
-  if (side && side.totalPoints != null) return Number(side.totalPoints);
-  // 2) applied total (seen in some JSONs)
+  const round2 = (x) => Math.round(Number(x) * 100) / 100;
+
+  if (side && side.totalPoints != null) return round2(side.totalPoints);
+
   if (side && side.rosterForMatchup && side.rosterForMatchup.appliedStatTotal != null) {
-    return Number(side.rosterForMatchup.appliedStatTotal);
+    return round2(side.rosterForMatchup.appliedStatTotal);
   }
-  // 3) sum by scoring period
+
   if (side && side.pointsByScoringPeriod && typeof side.pointsByScoringPeriod === 'object') {
     let sum = 0, seen = false;
     for (const v of Object.values(side.pointsByScoringPeriod)) {
       if (v != null) { sum += Number(v); seen = true; }
     }
-    if (seen) return sum;
+    if (seen) return round2(sum);
   }
-  return null; // unknown/unspecified -> treat as missing
+  return null;
 }
+
 
 
 /* ===================== ESPN 2021: build bundle helper ===================== */
