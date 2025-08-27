@@ -1217,6 +1217,25 @@ async function applyOwnerMap2021(esUsers, esRosters) {
   return { users: remappedUsers, rosters: remappedRosters };
 }
 
+function espnExtractPoints(side) {
+  // 1) direct total
+  if (side && side.totalPoints != null) return Number(side.totalPoints);
+  // 2) applied total (seen in some JSONs)
+  if (side && side.rosterForMatchup && side.rosterForMatchup.appliedStatTotal != null) {
+    return Number(side.rosterForMatchup.appliedStatTotal);
+  }
+  // 3) sum by scoring period
+  if (side && side.pointsByScoringPeriod && typeof side.pointsByScoringPeriod === 'object') {
+    let sum = 0, seen = false;
+    for (const v of Object.values(side.pointsByScoringPeriod)) {
+      if (v != null) { sum += Number(v); seen = true; }
+    }
+    if (seen) return sum;
+  }
+  return null; // unknown/unspecified -> treat as missing
+}
+
+
 /* ===================== ESPN 2021: build bundle helper ===================== */
 async function buildManualBundleFromESPN(data, seasonYear = 2021, fallbackLeagueName = "ESPN League 755639") {
   const teams = data.teams || [];
@@ -1261,10 +1280,15 @@ async function buildManualBundleFromESPN(data, seasonYear = 2021, fallbackLeague
     const h = s.home||{}, a = s.away||{};
     const hId = h.teamId, aId = a.teamId; if (hId==null || aId==null) return;
     const week = s.matchupPeriodId; if (week==null) return;
-    const hPts = +(h.totalPoints||0), aPts = +(a.totalPoints||0);
+    const hPts = espnExtractPoints(h);
+    const aPts = espnExtractPoints(a);
+
+    // If either side has no points (null), skip this game entirely to avoid fake 0–0 ties.
+    if (hPts == null || aPts == null) { mid++; return; }
 
     matchups.push({ week, matchup_id: mid, roster_id: hId, points: hPts });
     matchups.push({ week, matchup_id: mid, roster_id: aId, points: aPts });
+
 
     const playoffish = !!(s.playoffTierType || (s.matchupType && /CHAMP|PLAYOFF/i.test(s.matchupType)));
     if (playoffish) {
