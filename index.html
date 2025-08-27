@@ -308,6 +308,19 @@ function table(headers, rows) {
 }
 function destroyChart(ref) { if (ref && typeof ref.destroy === "function") ref.destroy(); }
 
+function round2(x){ return Math.round(Number(x)*100)/100; }
+function ptsOrNull(v){
+  if (v == null) return null;
+  const n = Number(v);
+  if (!isFinite(n)) return null;
+  return round2(n);
+}
+function nearlyEqual(a, b, eps = 0.01) {
+  if (a == null || b == null) return false;
+  return Math.abs(Number(a) - Number(b)) < eps;
+}
+
+
 /* ---------- Charts ---------- */
 function renderPFPAChart(rosters, userMap) {
   destroyChart(charts.scatter);
@@ -1010,22 +1023,33 @@ function pairKey(a,b){ return [String(a),String(b)].sort().join("|"); }
 async function fetchSeasonMatchupsAllWeeks(leagueId, rosters){
   const result = [];
   const teamIndex = new Map(); rosters.forEach(r => teamIndex.set(r.roster_id, r.owner_id));
+
   for (let wk=1; wk<=18; wk++){
     try {
       const arr = await fetchJson(`/league/${leagueId}/matchups/${wk}`);
       const groups = {};
       arr.forEach(x => { const id = x.matchup_id ?? `solo-${x.roster_id}`; (groups[id] ||= []).push(x); });
+
       Object.values(groups).forEach(g => {
         if (g.length !== 2) return;
         const [a,b] = g;
+
         const a_uid = teamIndex.get(a.roster_id), b_uid = teamIndex.get(b.roster_id);
-        if (!a_uid || !b_uid || a_uid===b_uid) return;
-        result.push({ a_uid, b_uid, a_pts: +(a.points||0), b_pts: +(b.points||0), week:wk });
+        if (!a_uid || !b_uid || a_uid === b_uid) return;
+
+        const aPts = ptsOrNull(a.points);
+        const bPts = ptsOrNull(b.points);
+
+        // If either side doesn’t have a real score yet, SKIP this game (don’t record a 0–0)
+        if (aPts == null || bPts == null) return;
+
+        result.push({ a_uid, b_uid, a_pts: aPts, b_pts: bPts, week: wk });
       });
     } catch {}
   }
   return result;
 }
+
 async function ensureRivalriesComputed(){
   if (Rivalries) return;
   const years = [2025, 2024, 2023, 2022, 2021];
@@ -1091,33 +1115,19 @@ function renderRivalriesFor(uid){
       const myPts = (g.a_uid === uid) ? g.a_pts : g.b_pts;
       const opPts = (g.a_uid === uid) ? g.b_pts : g.a_pts;
 
-/*       // treat tiny float differences as decisive, not ties
+      // Skip incomplete games
+      if (myPts == null || opPts == null) return;
+
+      // Only treat as tie if truly equal (within 0.01)
       if (nearlyEqual(myPts, opPts)) {
-        // true tie only if *exact* equality within epsilon and BOTH non-null
-        // If either side is missing, skip this game entirely (don’t count it)
-        if (myPts != null && opPts != null) { t++; pf += myPts; pa += opPts; meetings++; }
+        t++; pf += myPts; pa += opPts; meetings++;
         return;
       }
 
-      // normal win/loss
       pf += myPts; pa += opPts; meetings++;
-      if (myPts > opPts) w++; else l++; */
-      
-      if (myPts == null || opPts == null) {
-      // skip incomplete games (don’t count)
-        return;
-      }
-
-      if (nearlyEqual(myPts, opPts)) {
-        t++;
-      } else if (myPts > opPts) {
-        w++;
-      } else {
-        l++;
-      }
-
-
+      if (myPts > opPts) w++; else l++;
     });
+
 
     const stat = seenOpp.get(opp) || { w:0,l:0,t:0,pf:0,pa:0,meetings:0 };
     stat.w += w; stat.l += l; stat.t += t; stat.pf += pf; stat.pa += pa; stat.meetings += meetings;
