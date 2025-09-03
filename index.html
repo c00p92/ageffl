@@ -1020,8 +1020,12 @@ async function fetchSeasonMatchupsAllWeeks(leagueId, rosters){
         const [a,b] = g;
         const a_uid = teamIndex.get(a.roster_id), b_uid = teamIndex.get(b.roster_id);
         if (!a_uid || !b_uid || a_uid===b_uid) return;
-        result.push({ a_uid, b_uid, a_pts: +(a.points||0), b_pts: +(b.points||0), week:wk });
-      });
+        const _aPts = Number(a?.points ?? NaN);
+const _bPts = Number(b?.points ?? NaN);
+if (Number.isFinite(_aPts) && Number.isFinite(_bPts) && !(_aPts===0 && _bPts===0)) {
+  result.push({ a_uid, b_uid, a_pts:_aPts, b_pts:_bPts, week:wk });
+}
+});
     } catch {}
   }
   return result;
@@ -1048,8 +1052,12 @@ async function ensureRivalriesComputed(){
         const a_uid = teamIndex.get(a.roster_id), b_uid = teamIndex.get(b.roster_id); if (!a_uid||!b_uid||a_uid===b_uid) return;
         const key = pairKey(a_uid,b_uid);
         const bucket = pairs.get(key) || { a:a_uid, b:b_uid, games:[] };
-        bucket.games.push({ a_uid, b_uid, a_pts:+(a.points||0), b_pts:+(b.points||0), season:yr, week:a.week });
-        pairs.set(key, bucket);
+        const _aPts = Number(a?.points ?? NaN);
+const _bPts = Number(b?.points ?? NaN);
+if (Number.isFinite(_aPts) && Number.isFinite(_bPts) && !(_aPts===0 && _bPts===0)) {
+  bucket.games.push({ a_uid, b_uid, a_pts:_aPts, b_pts:_bPts, season:yr, week:a.week });
+}
+pairs.set(key, bucket);
       });
     } else {
       // Sleeper seasons: fetch all weeks
@@ -1085,7 +1093,7 @@ function renderRivalriesFor(uid){
       const myPts = (g.a_uid === uid) ? g.a_pts : g.b_pts;
       const opPts = (g.a_uid === uid) ? g.b_pts : g.a_pts;
       pf += myPts; pa += opPts; meetings++;
-      if (myPts > opPts) w++; else if (myPts < opPts) l++; else t++;
+      if (myPts > opPts) w++; else if (myPts < opPts) l++; else if (isRealTie(myPts, opPts)) t++;
     });
     const stat = seenOpp.get(opp) || { w:0,l:0,t:0,pf:0,pa:0,meetings:0 };
     stat.w += w; stat.l += l; stat.t += t; stat.pf += pf; stat.pa += pa; stat.meetings += meetings;
@@ -1410,14 +1418,13 @@ async function importESPN2021Public(espnLeagueId = ESPN_PUBLIC_2021_LEAGUE_ID) {
 rivalSelect.addEventListener("change", () => renderRivalriesFor(rivalSelect.value));
 
 
-/* True tie detection for Rivalries: avoids 0–0 placeholders & float artifacts */
-function isRealTie(aPts, bPts) {
-  const pa = Number(aPts);
-  const pb = Number(bPts);
+/* ---- Helper: strict tie detection (filters out phantom 0–0 / partial games) ---- */
+function isRealTie(aPts, bPts){
+  const pa = Number(aPts), pb = Number(bPts);
   if (!Number.isFinite(pa) || !Number.isFinite(pb)) return false;
-  // Skip 0–0 placeholders from unplayed/in-progress matchups
+  // Ignore 0–0 placeholders for unplayed/in-progress weeks
   if (pa === 0 && pb === 0) return false;
-  // Consider equal at Sleeper precision and within epsilon to avoid float noise
+  // Equal within Sleeper's hundredth precision and float epsilon
   const eq2 = Number(pa.toFixed(2)) === Number(pb.toFixed(2));
   const eps = Math.abs(pa - pb) < 1e-6;
   return eq2 && eps;
