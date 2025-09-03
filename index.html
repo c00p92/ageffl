@@ -76,6 +76,14 @@
   .btnrow { display:flex; gap:8px; flex-wrap:wrap; }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+
+<style>
+  #exportBtn, #exportAllTimeBtn, #importBtn, #importFile,
+  #importUrl, #importUrlBtn, #ghSpec, #loadGhBtn {
+    display: none !important;
+  }
+</style>
+
 </head>
 <body>
 
@@ -88,7 +96,7 @@
     <div style="display:flex; gap:10px;">
       <button id="autoWeekBtn" class="secondary" title="Detect current NFL week">Auto Week</button>
 
-      <input id="ghSpec" type="text" placeholder="c00p92/ageffl@main:espn_2021_raw.json" style="flex:1;min-width:260px;margin-left:8px;">
+      <input id="ghSpec" type="text" placeholder="owner/repo@branch:path/to/previews.json" style="flex:1;min-width:260px;margin-left:8px;">
       <button id="loadGhBtn" class="secondary">Load from GitHub</button>
 
       <button id="loadBtn" class="primary">Load Current Season</button>
@@ -1440,13 +1448,6 @@ function isRealTie(aPts, bPts){
 
 
 // --- Remote JSON Import (share across devices) ---
-function getQueryOrHashParam(name){
-  const q = new URLSearchParams(location.search).get(name);
-  if (q) return q;
-  const h = new URLSearchParams(location.hash.replace(/^#/, ""));
-  return h.get(name);
-}
-
 async function importPreviewsJsonText(txt){
   try {
     const data = JSON.parse(txt);
@@ -1514,7 +1515,11 @@ async function fetchTextOrThrow(url){
 
 
 
-const DEFAULT_GITHUB_SPEC = "owner/repo@main:path/to/previews.json"; // <-- EDIT ME
+const DEFAULT_GITHUB_SPEC = "c00p92/ageffl@main:espn_raw_2021.json";
+const DEFAULT_GITHUB_SPECS = [
+  "c00p92/ageffl@main:espn_raw_2021.json",
+  "c00p92/ageffl@main:data/espn_raw_2021.json"
+]; // <-- EDIT ME
 // --- GitHub Repo Loader ---
 // Accepts shorthand like: owner/repo@branch:path/to/previews.json
 function parseGhSpec(spec){
@@ -1603,15 +1608,36 @@ async function loadPreviewsFromGithubSpec(spec){
 // Auto-load if ?gh= or #gh= is present (or use last remembered spec)
 (async function autoLoadGithub(){
   try {
-    const ghParam = getQueryOrHashParam && getQueryOrHashParam('gh');
-const remembered = localStorage.getItem('previews_github_spec');
-const spec = ghParam || remembered || DEFAULT_GITHUB_SPEC;
-    if (!spec) return;
-    const inp = document.querySelector('#ghSpec'); if (inp) inp.value = spec || DEFAULT_GITHUB_SPEC;
-    await loadPreviewsFromGithubSpec(spec);
+    let spec = DEFAULT_GITHUB_SPEC;
+    try {
+      await loadPreviewsFromGithubSpec(spec);
+    } catch (err) {
+      const alt = await tryLoadFromSpecs(DEFAULT_GITHUB_SPECS);
+      if (!alt) throw err;
+    }
   } catch(_) {}
 })();
+async function tryLoadFromSpecs(specs){
+  for (const s of (specs || [])) {
+    try { 
+      const ok = await loadPreviewsFromGithubSpec(s); 
+      if (ok) return s; 
+    } catch(_) {}
+  }
+  return null;
+}
 
 </script>
+
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  ["exportBtn","exportAllTimeBtn","importBtn","importFile","importUrl","importUrlBtn","ghSpec","loadGhBtn"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { const p = el.closest(".btnrow") || el; try { p.remove(); } catch(_) { el.style.display="none"; } }
+  });
+});
+</script>
+
 </body>
 </html>
