@@ -1408,6 +1408,21 @@ async function importESPN2021Public(espnLeagueId = ESPN_PUBLIC_2021_LEAGUE_ID) {
 
 /* ---------- Rival select hook ---------- */
 rivalSelect.addEventListener("change", () => renderRivalriesFor(rivalSelect.value));
+
+
+/* True tie detection for Rivalries: avoids 0–0 placeholders & float artifacts */
+function isRealTie(aPts, bPts) {
+  const pa = Number(aPts);
+  const pb = Number(bPts);
+  if (!Number.isFinite(pa) || !Number.isFinite(pb)) return false;
+  // Skip 0–0 placeholders from unplayed/in-progress matchups
+  if (pa === 0 && pb === 0) return false;
+  // Consider equal at Sleeper precision and within epsilon to avoid float noise
+  const eq2 = Number(pa.toFixed(2)) === Number(pb.toFixed(2));
+  const eps = Math.abs(pa - pb) < 1e-6;
+  return eq2 && eps;
+}
+
 </script>
 </body>
 </html>
