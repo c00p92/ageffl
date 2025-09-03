@@ -214,38 +214,6 @@ let charts = { scatter:null, pf:null, week:null };
 let cache = { league:null, users:[], rosters:[], matchupsByWeek:{}, seasons:{} };
 
 /* ---------- Utilities ---------- */
-/* Robust tie detection (avoid "phantom ties" from Sleeper data) */
-function trueTie(a, b) {
-  // Must have two entries
-  if (!a || !b) return false;
-
-  // Parse points safely
-  const pa = Number(a?.points ?? NaN);
-  const pb = Number(b?.points ?? NaN);
-  if (!isFinite(pa) || !isFinite(pb)) return false;
-
-  // Ignore groups that aren't exactly 2 entries (handled earlier) — safeguard
-  if ((a.matchup_id ?? null) === null || (b.matchup_id ?? null) === null) return false;
-
-  // Sleeper occasionally yields 0–0 during stat processing or incomplete data;
-  // those should not be treated as real ties.
-  if (pa === 0 && pb === 0) return false;
-
-  // If either side exposes a "winner" field anywhere in the objects,
-  // don't call it a tie (Sleeper typically sets 'winner' on the winning roster).
-  // We check a few possible places to be defensive.
-  const aw = a?.winner ?? a?.metadata?.winner ?? a?.settings?.winner ?? null;
-  const bw = b?.winner ?? b?.metadata?.winner ?? b?.settings?.winner ?? null;
-  if (aw || bw) return false;
-
-  // Treat as tie only if effectively equal after rounding to Sleeper's two-decimal precision
-  // AND also numerically within a tight epsilon to avoid float artifacts.
-  const eq2 = Number(pa.toFixed(2)) === Number(pb.toFixed(2));
-  const eps = Math.abs(pa - pb) < 1e-6;
-
-  return eq2 && eps;
-}
-
 function themeColors() {
   const s = getComputedStyle(document.documentElement);
   return { text: s.getPropertyValue('--text').trim(), grid: s.getPropertyValue('--border').trim(),
@@ -516,7 +484,22 @@ async function loadMatchups() {
         const [a,b] = arr;
         const nameA = rosterToOwner[a.roster_id], nameB = rosterToOwner[b.roster_id];
         const scoreA = a.points ?? 0, scoreB = b.points ?? 0;
-        const winner = trueTie(a, b) ? \"Tie\" : (scoreA > scoreB ? nameA : nameB);
+        const isTrueTie = (() => {
+          const pa = Number(a && a.points != null ? a.points : NaN);
+          const pb = Number(b && b.points != null ? b.points : NaN);
+          if (!Number.isFinite(pa) || !Number.isFinite(pb)) return false;
+          // Prevent phantom 0–0 ties from partial data loads
+          if (pa === 0 && pb === 0) return false;
+          // If Sleeper marks a winner anywhere on the objects, it's not a tie
+          const aw = (a && (a.winner || (a.metadata && a.metadata.winner) || (a.settings && a.settings.winner))) || null;
+          const bw = (b && (b.winner || (b.metadata && b.metadata.winner) || (b.settings && b.settings.winner))) || null;
+          if (aw || bw) return false;
+          // Require equality at Sleeper's two-decimal precision AND tight epsilon
+          const eq2 = Number(pa.toFixed(2)) === Number(pb.toFixed(2));
+          const eps = Math.abs(pa - pb) < 1e-6;
+          return eq2 && eps;
+        })();
+        const winner = isTrueTie ? "Tie" : (scoreA > scoreB ? nameA : nameB);
         return [week, mid, nameA, scoreA, nameB, scoreB, winner];
       } else {
         const only = arr[0], name = rosterToOwner[only.roster_id];
