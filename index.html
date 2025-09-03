@@ -1606,16 +1606,86 @@ async function loadPreviewsFromGithubSpec(spec){
 })();
 
 // Auto-load if ?gh= or #gh= is present (or use last remembered spec)
+
 (async function autoLoadGithub(){
   try {
     let spec = DEFAULT_GITHUB_SPEC;
-    try {
-      await loadPreviewsFromGithubSpec(spec);
-    } catch (err) {
-      const alt = await tryLoadFromSpecs(DEFAULT_GITHUB_SPECS);
-      if (!alt) throw err;
+    // Always use defaults; ignore URL overrides and remembered values
+    // Fetch raw text (API first, then raw CDN)
+    function parseGhSpec(spec){
+      spec = (spec || "").trim();
+      if (!spec) return null;
+      let ownerRepo, ref = "main", path = "";
+      const colon = spec.indexOf(':');
+      ownerRepo = colon === -1 ? spec : spec.slice(0, colon);
+      path = colon === -1 ? "" : spec.slice(colon + 1);
+      const at = ownerRepo.indexOf('@');
+      const repoPart = at === -1 ? ownerRepo : ownerRepo.slice(0, at);
+      ref = at === -1 ? ref : ownerRepo.slice(at + 1);
+      const slash = repoPart.indexOf('/');
+      if (slash === -1) return null;
+      const owner = repoPart.slice(0, slash);
+      const repo = repoPart.slice(slash + 1);
+      if (!owner || !repo || !path) return null;
+      return { owner, repo, ref, path };
     }
-  } catch(_) {}
+    async function fetchGithubRaw(parsed){
+      const url = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/contents/${parsed.path}?ref=${encodeURIComponent(parsed.ref)}`;
+      const res = await fetch(url, { headers: { "Accept": "application/vnd.github.v3.raw" }, cache: "no-store" });
+      if (!res.ok) throw new Error(`GitHub API ${res.status} ${res.statusText}`);
+      return await res.text();
+    }
+    async function fetchGithubRawCdn(parsed){
+      const url = `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repo}/${parsed.ref}/${parsed.path}`;
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) throw new Error(`raw.githubusercontent.com ${res.status} ${res.statusText}`);
+      return await res.text();
+    }
+
+    async function trySpec(spec){
+      const parsed = parseGhSpec(spec);
+      if (!parsed) throw new Error("Invalid DEFAULT_GITHUB_SPEC");
+      try {
+        return await fetchGithubRaw(parsed);
+      } catch (e1){
+        try { return await fetchGithubRawCdn(parsed); }
+        catch (e2){ throw e1; }
+      }
+    }
+
+    // Try primary default, then fallbacks
+    let txt;
+    try { txt = await trySpec(spec); }
+    catch (err1) {
+      let okAlt = null;
+      for (const s of (DEFAULT_GITHUB_SPECS || [])) {
+        try { txt = await trySpec(s); okAlt = s; break; } catch {}
+      }
+      if (!okAlt && !txt) throw err1;
+    }
+
+    // Decide import path: ESPN JSON vs Previews JSON
+    const lower = spec.toLowerCase();
+    let did = false;
+    if (lower.includes("espn_raw_2021.json")) {
+      did = await importESPN2021JsonText(txt);
+    } else {
+      try {
+        const probe = JSON.parse(txt);
+        // Heuristic: ESPN JSON typically has "teams" array and "schedule" or "events"
+        if (probe && (Array.isArray(probe.teams) || Array.isArray(probe.schedule) || probe.status || probe.scoringPeriodId)) {
+          did = await importESPN2021JsonText(txt);
+        } else {
+          did = await importPreviewsJsonText(txt);
+        }
+      } catch {
+        did = await importPreviewsJsonText(txt);
+      }
+    }
+    if (!did) console.warn("Auto import finished with no changes.");
+  } catch(e) {
+    console.warn("Auto GitHub load failed:", e);
+  }
 })();
 async function tryLoadFromSpecs(specs){
   for (const s of (specs || [])) {
@@ -1637,6 +1707,30 @@ document.addEventListener("DOMContentLoaded", () => {
     if (el) { const p = el.closest(".btnrow") || el; try { p.remove(); } catch(_) { el.style.display="none"; } }
   });
 });
+
+
+async function importESPN2021JsonText(txt){
+  try {
+    const data = JSON.parse(txt);
+    const bundle = await buildManualBundleFromESPN(data, 2021, "ESPN League 755639");
+    localStorage.setItem(ESPN_2021_CACHE_KEY, JSON.stringify(bundle));
+    MANUAL[manualKey(2021)] = bundle; LEAGUES[2021] = manualKey(2021);
+    registerProfilesFromManual(bundle.users);
+    // Recompute summaries and tables after loading
+    if (typeof loadSeasonsSummary === "function") await loadSeasonsSummary();
+    if (typeof computeAllTime === "function") {
+      const at = await computeAllTime();
+      if (typeof renderAllTimeTable === "function") renderAllTimeTable(at);
+    }
+    // Try refresh of current league views if those functions exist
+    if (typeof loadCurrentLeague === "function") await loadCurrentLeague();
+    return true;
+  } catch(err){
+    console.error("ESPN JSON import failed:", err);
+    return false;
+  }
+}
+
 </script>
 
 </body>
