@@ -87,6 +87,10 @@
     </div>
     <div style="display:flex; gap:10px;">
       <button id="autoWeekBtn" class="secondary" title="Detect current NFL week">Auto Week</button>
+
+      <input id="ghSpec" type="text" placeholder="c00p92/ageffl@main:previews.json" style="flex:1;min-width:260px;margin-left:8px;">
+      <button id="loadGhBtn" class="secondary">Load from GitHub</button>
+
       <button id="loadBtn" class="primary">Load Current Season</button>
       <button id="matchupsBtn" class="secondary">Load Matchups</button>
     </div>
@@ -160,6 +164,9 @@
       <button id="exportBtn" class="secondary">Export JSON</button>
       <input id="importFile" type="file" accept="application/json" style="display:none;">
       <button id="importBtn" class="secondary">Import JSON</button>
+      <input id="importUrl" type="url" placeholder="https://.../previews.json" style="flex:1;min-width:260px;margin-left:8px;">
+      <button id="importUrlBtn" class="secondary">Load JSON from URL</button>
+
     </div>
     <div id="previewsWrap" class="cards"></div>
   </section>
@@ -1429,6 +1436,181 @@ function isRealTie(aPts, bPts){
   const eps = Math.abs(pa - pb) < 1e-6;
   return eq2 && eps;
 }
+
+
+
+// --- Remote JSON Import (share across devices) ---
+function getQueryOrHashParam(name){
+  const q = new URLSearchParams(location.search).get(name);
+  if (q) return q;
+  const h = new URLSearchParams(location.hash.replace(/^#/, ""));
+  return h.get(name);
+}
+
+async function importPreviewsJsonText(txt){
+  try {
+    const data = JSON.parse(txt);
+    const leagueId = LEAGUES[CURRENT_SEASON];
+    Object.entries(data).forEach(([week, m]) => {
+      Object.entries(m).forEach(([mid, text]) => {
+        localStorage.setItem(`sleeper_previews_${leagueId}_${week}_${mid}`, text || "");
+      });
+    });
+    alert("Previews imported.");
+    return true;
+  } catch(err){
+    alert("Invalid JSON: " + err.message);
+    return false;
+  }
+}
+
+async function fetchTextOrThrow(url){
+  const res = await fetch(url, { headers: { "Accept": "application/json" } });
+  if (!res.ok) {
+    const body = await res.text().catch(()=>"");
+    throw new Error(`HTTP ${res.status} ${res.statusText} — ${body.slice(0,200)}`);
+  }
+  return await res.text();
+}
+
+// Button: Load JSON from URL
+(function(){
+  const btn = document.querySelector('#importUrlBtn');
+  const inp = document.querySelector('#importUrl');
+  if (!btn || !inp) return;
+  btn.addEventListener('click', async () => {
+    const url = (inp.value || '').trim();
+    if (!url) { alert("Paste a URL to a JSON file first."); return; }
+    try {
+      const txt = await fetchTextOrThrow(url);
+      const ok = await importPreviewsJsonText(txt);
+      if (ok) {
+        localStorage.setItem('previews_json_url', url);
+        // reflect into hash so others can open the same link
+        const hs = new URLSearchParams(location.hash.replace(/^#/, ""));
+        hs.set('json', url);
+        location.hash = hs.toString();
+      }
+    } catch(err){
+      alert("Failed to fetch: " + err.message);
+    }
+  });
+})();
+
+// Auto-load on startup if ?json= or #json= is provided (or use last-used URL)
+(async function autoLoadRemotePreviews(){
+  try {
+    const fromParam = getQueryOrHashParam('json');
+    const remembered = localStorage.getItem('previews_json_url');
+    const url = fromParam || remembered;
+    if (!url) return;
+    // Put URL into input for visibility
+    const inp = document.querySelector('#importUrl'); if (inp) inp.value = url;
+    const txt = await fetchTextOrThrow(url);
+    await importPreviewsJsonText(txt);
+  } catch(_) { /* silent */ }
+})();
+
+
+
+
+const DEFAULT_GITHUB_SPEC = "owner/repo@main:path/to/previews.json"; // <-- EDIT ME
+// --- GitHub Repo Loader ---
+// Accepts shorthand like: owner/repo@branch:path/to/previews.json
+function parseGhSpec(spec){
+  // Trim and normalize
+  spec = (spec || "").trim();
+  if (!spec) return null;
+  // Default branch is "main" if omitted
+  let ownerRepo, ref = "main", path = "";
+  // Split at first ":" to separate path
+  const colon = spec.indexOf(':');
+  ownerRepo = colon === -1 ? spec : spec.slice(0, colon);
+  path = colon === -1 ? "" : spec.slice(colon + 1);
+
+  // Split owner/repo and optional @ref
+  const at = ownerRepo.indexOf('@');
+  const repoPart = at === -1 ? ownerRepo : ownerRepo.slice(0, at);
+  ref = at === -1 ? ref : ownerRepo.slice(at + 1);
+  const slash = repoPart.indexOf('/');
+  if (slash === -1) return null;
+  const owner = repoPart.slice(0, slash);
+  const repo = repoPart.slice(slash + 1);
+  if (!owner || !repo || !path) return null;
+  return { owner, repo, ref, path };
+}
+
+// Prefer GitHub API "contents" endpoint with raw accept (better cache/Etag handling)
+async function fetchGithubRaw({owner, repo, ref, path}){
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(ref)}`;
+  const res = await fetch(url, {
+    headers: { "Accept": "application/vnd.github.v3.raw" }, // get raw file bytes
+    cache: "no-store"
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(()=>"");
+    throw new Error(`GitHub API ${res.status} ${res.statusText} — ${body.slice(0,200)}`);
+  }
+  return await res.text();
+}
+
+// Fallback: raw.githubusercontent.com
+async function fetchGithubRawCdn({owner, repo, ref, path}){
+  const url = `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${path}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    const body = await res.text().catch(()=>"");
+    throw new Error(`raw.githubusercontent.com ${res.status} ${res.statusText} — ${body.slice(0,200)}`);
+  }
+  return await res.text();
+}
+
+async function loadPreviewsFromGithubSpec(spec){
+  const parsed = parseGhSpec(spec);
+  if (!parsed) throw new Error("Invalid format. Use owner/repo@branch:path/to/previews.json");
+  // Try API first for better reliability, then CDN fallback
+  let txt;
+  try {
+    txt = await fetchGithubRaw(parsed);
+  } catch (e1){
+    try { txt = await fetchGithubRawCdn(parsed); }
+    catch (e2){ throw e1; }
+  }
+  return importPreviewsJsonText(txt);
+}
+
+// Wire up UI
+(function(){
+  const btn = document.querySelector('#loadGhBtn');
+  const inp = document.querySelector('#ghSpec');
+  if (!btn || !inp) return;
+  btn.addEventListener('click', async () => {
+    const spec = (inp.value || "").trim();
+    if (!spec) { alert("Enter owner/repo@branch:path/to/previews.json"); return; }
+    try {
+      const ok = await loadPreviewsFromGithubSpec(spec);
+      if (ok) {
+        localStorage.setItem('previews_github_spec', spec);
+        // Add to the URL hash so others can load the same repo path
+        const hs = new URLSearchParams(location.hash.replace(/^#/, ""));
+        hs.set('gh', spec);
+        location.hash = hs.toString();
+      }
+    } catch(err){ alert("GitHub load failed: " + err.message); }
+  });
+})();
+
+// Auto-load if ?gh= or #gh= is present (or use last remembered spec)
+(async function autoLoadGithub(){
+  try {
+    const ghParam = getQueryOrHashParam && getQueryOrHashParam('gh');
+const remembered = localStorage.getItem('previews_github_spec');
+const spec = ghParam || remembered || DEFAULT_GITHUB_SPEC;
+    if (!spec) return;
+    const inp = document.querySelector('#ghSpec'); if (inp) inp.value = spec || DEFAULT_GITHUB_SPEC;
+    await loadPreviewsFromGithubSpec(spec);
+  } catch(_) {}
+})();
 
 </script>
 </body>
