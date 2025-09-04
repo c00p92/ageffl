@@ -84,6 +84,18 @@
   }
 </style>
 
+
+<style>
+  .preview-card .preview-copy { margin-top: 8px; }
+  .preview-card .preview-text { white-space: pre-wrap; line-height: 1.4; margin: 0; }
+</style>
+
+
+<style>
+  .preview-card .btnrow, .preview-card textarea.preview { display:none !important; }
+  #importBtn, #importFile, #importUrl, #importUrlBtn, #loadGhBtn, #ghSpec { display:none !important; }
+</style>
+
 </head>
 <body>
 
@@ -761,6 +773,7 @@ async function loadMatchups() {
 
     renderWeekBar(rows);
 
+    await importCurrentWeekPreviewsFromGithub(CURRENT_SEASON, week, leagueId);
     renderPreviews(week, groups, users, rosters);
 
   } catch (err) {
@@ -832,6 +845,10 @@ function renderPreviews(week, groups, users, rosters) {
   };
   const ownerOfRoster = (rid) => (rosters.find(x=>x.roster_id===rid)||{}).owner_id;
 
+  // PF ranks per roster
+  const pfSorted = [...rosters].sort((a,b)=> (b?.settings?.fpts ?? 0) - (a?.settings?.fpts ?? 0));
+  const pfRank = new Map(pfSorted.map((r,i)=>[r.roster_id, i+1]));
+
   const cards = Object.entries(groups).map(([mid, arr]) => {
     if (arr.length !== 2) return '';
     const [a,b] = arr;
@@ -845,17 +862,18 @@ function renderPreviews(week, groups, users, rosters) {
           <span class="muted"> vs </span>
           <span class="namecell">${nameCellForOwner(ownerB, nameOfRoster(b.roster_id), true)}</span>
           <span class="muted"> • Week ${week}</span>
+          <div class="muted" style="font-weight:400; font-size:12px; margin-top:4px;">
+            <span>Record: ${(rosters.find(r=>r.roster_id===a.roster_id)?.settings?.wins ?? 0)}-${(rosters.find(r=>r.roster_id===a.roster_id)?.settings?.losses ?? 0)} (PF rank #${pfRank.get(a.roster_id) || "–"})</span>
+            <span style="margin:0 8px;">vs</span>
+            <span>Record: ${(rosters.find(r=>r.roster_id===b.roster_id)?.settings?.wins ?? 0)}-${(rosters.find(r=>r.roster_id===b.roster_id)?.settings?.losses ?? 0)} (PF rank #${pfRank.get(b.roster_id) || "–"})</span>
+          </div>
         </h3>
         <div class="preview-meta">
           <span class="pill">Matchup ID: ${mid}</span>
           <span>Team A PF: ${rosters.find(r=>r.roster_id===a.roster_id)?.settings?.fpts ?? 0}</span>
           <span>Team B PF: ${rosters.find(r=>r.roster_id===b.roster_id)?.settings?.fpts ?? 0}</span>
         </div>
-        <textarea class="preview" placeholder="Write your preview...">${saved}</textarea>
-        <div class="btnrow">
-          <button class="secondary genOneBtn">Auto-fill (Local AI)</button>
-          <button class="primary saveBtn">Save</button>
-        </div>
+        <div class="preview-copy"><p class="preview-text">${saved || "<span class=\"muted\">No preview for this matchup.</span>"}</p></div>
       </div>
     `;
   }).filter(Boolean);
@@ -863,32 +881,7 @@ function renderPreviews(week, groups, users, rosters) {
   previewsWrap.innerHTML = cards.join("");
   previewsWrap.querySelectorAll('.preview-card').forEach(card => {
     const mid = card.dataset.mid;
-    const genBtn = card.querySelector('.genOneBtn');
-    const saveBtn = card.querySelector('.saveBtn');
-    const ta = card.querySelector('textarea.preview');
-
-    genBtn.addEventListener('click', async () => {
-      const arr = (function(){ return groups[mid]; })();
-      if (!arr || arr.length !== 2) return;
-      const [a,b] = arr;
-      ta.value = "Generating…";
-      try {
-        ta.value = await generatePreviewLocal({
-          week,
-          a, b,
-          teamNameA: (rosters.find(r=>r.roster_id===a.roster_id)?.settings?.team_name) || "Team A",
-          teamNameB: (rosters.find(r=>r.roster_id===b.roster_id)?.settings?.team_name) || "Team B",
-          rosters, users
-        });
-      } catch (e) { ta.value = `Could not generate: ${e.message}`; }
     });
-
-    saveBtn.addEventListener('click', () => {
-      savePreview(week, mid, ta.value);
-      saveBtn.textContent = "Saved ✓";
-      setTimeout(()=> saveBtn.textContent = "Save", 1200);
-    });
-  });
 }
 // Export/Import previews JSON
 el("#exportBtn").addEventListener("click", () => {
@@ -1150,7 +1143,6 @@ el("#genAllBtn").addEventListener("click", async () => {
     const mid = card.dataset.mid;
     const arr = groups[mid]; if (!arr || arr.length !== 2) continue;
     const [a,b] = arr;
-    const ta = card.querySelector('textarea.preview');
     ta.value = "Generating…";
     try {
       ta.value = await generatePreviewLocal({
@@ -1515,6 +1507,23 @@ async function fetchTextOrThrow(url){
 
 
 
+
+// Default GitHub path for matchup previews (one file per season)
+
+// One-file-per-week previews
+// Example resolves to: c00p92/ageffl@main:previews/2025/week-01.json
+const WEEKLY_PREVIEWS_SPEC_TEMPLATE = "c00p92/ageffl@main:previews/{season}/week-{week2}.json";
+const WEEKLY_PREVIEWS_SPEC_FALLBACKS = [
+  "c00p92/ageffl@main:data/previews/{season}/week-{week2}.json",
+  "c00p92/ageffl@main:previews/{season}/week-{week}.json",
+  "c00p92/ageffl@main:data/previews/{season}/week-{week}.json"
+];
+const DEFAULT_PREVIEWS_SPEC_TEMPLATE = "c00p92/ageffl@main:previews_{season}.json";
+const DEFAULT_PREVIEWS_SPEC_FALLBACKS = [
+  "c00p92/ageffl@main:data/previews_{season}.json",
+  "c00p92/ageffl@main:previews.json",                 // season-agnostic (rare)
+  "c00p92/ageffl@main:data/previews.json"
+];
 const DEFAULT_GITHUB_SPEC = "c00p92/ageffl@main:espn_2021_raw.json";
 const DEFAULT_GITHUB_SPECS = [
   "c00p92/ageffl@main:espn_2021_raw.json",
@@ -1686,7 +1695,10 @@ async function loadPreviewsFromGithubSpec(spec){
   } catch(e) {
     console.warn("Auto GitHub load failed:", e);
   }
-})();
+})()
+
+// (weekly previews now handled per-week in loadMatchups)
+;
 async function tryLoadFromSpecs(specs){
   for (const s of (specs || [])) {
     try { 
@@ -1730,6 +1742,149 @@ async function importESPN2021JsonText(txt){
     return false;
   }
 }
+
+
+
+async function importPreviewsJsonTextForLeague(txt, leagueId){
+  try {
+    const data = JSON.parse(txt);
+    Object.entries(data).forEach(([week, m]) => {
+      Object.entries(m).forEach(([mid, text]) => {
+        localStorage.setItem(`sleeper_previews_${leagueId}_${week}_${mid}`, text || "");
+      });
+    });
+    return true;
+  } catch(err){
+    console.error("Preview JSON parse failed:", err);
+    return false;
+  }
+}
+
+
+
+async function fetchTextFromGhSpec(spec){
+  const parsed = (typeof parseGhSpec === "function") ? parseGhSpec(spec) : null;
+  if (!parsed) throw new Error("Bad GitHub spec: " + spec);
+  try { return await fetchGithubRaw(parsed); }
+  catch (e1) {
+    try { return await fetchGithubRawCdn(parsed); }
+    catch (e2) { throw e1; }
+  }
+}
+
+
+
+async function importPreviewsWeeklyJsonTextForLeague(txt, leagueId, week){
+  try {
+    const data = JSON.parse(txt);
+    const w = String(week);
+    // If top-level is {mid: text}, import directly; if nested {week:{mid:text}}, accept that too.
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      const maybeText = Object.values(data)[0];
+      if (typeof maybeText === 'string') {
+        for (const [mid, text] of Object.entries(data)) {
+          localStorage.setItem(`sleeper_previews_${leagueId}_${w}_${mid}`, text || "");
+        }
+        return true;
+      }
+      // Nested: { "7": { mid: text } }
+      const perWeek = data[w] || {};
+      for (const [mid, text] of Object.entries(perWeek)) {
+        localStorage.setItem(`sleeper_previews_${leagueId}_${w}_${mid}`, text || "");
+      }
+      return true;
+    }
+    return false;
+  } catch(err){
+    console.error("Weekly preview JSON parse failed:", err);
+    return false;
+  }
+}
+
+
+
+async function importCurrentWeekPreviewsFromGithub(season, week, leagueId){
+  try {
+    // Only for Sleeper seasons 2025+
+    if (Number(season) < 2025) return;
+    if (typeof isManualLeagueId === "function" && isManualLeagueId(leagueId)) return;
+
+    // Build primary + fallback specs
+    const wk = String(week);
+    const week2 = wk.padStart(2, '0');
+    const replacements = { "{season}": String(season), "{week}": wk, "{week2}": week2 };
+    function fill(t){ return Object.entries(replacements).reduce((s,[k,v])=>s.replaceAll(k,v), t); }
+
+    const tried = [
+      fill(WEEKLY_PREVIEWS_SPEC_TEMPLATE),
+      ...((WEEKLY_PREVIEWS_SPEC_FALLBACKS||[]).map(fill))
+    ].filter(Boolean);
+
+    for (const spec of tried) {
+      try {
+        const txt = await fetchTextFromGhSpec(spec);
+        const ok = await importPreviewsWeeklyJsonTextForLeague(txt, leagueId, week);
+        if (ok) { console.log("Imported weekly previews from", spec); return; }
+      } catch(_) { /* try next */ }
+    }
+  } catch (e) {
+    console.warn("Weekly preview import failed:", e);
+  }
+}
+
+
+
+async function loadPreviewsPage() {
+  try {
+    const leagueId = LEAGUES[CURRENT_SEASON];
+    const week = await getCurrentWeek();
+    if (!week) throw new Error("Could not determine current week.");
+    // Pull data
+    const [matchups, rosters, users] = await Promise.all([
+      fetchJson(`/league/${leagueId}/matchups/${week}`),
+      cache.rosters?.length ? Promise.resolve(cache.rosters) : fetchJson(`/league/${leagueId}/rosters`),
+      cache.users?.length ? Promise.resolve(cache.users) : fetchJson(`/league/${leagueId}/users`)
+    ]);
+    cache.matchupsByWeek[week] = matchups;
+    registerProfilesFromSleeper(users);
+    // Group by matchup_id (2 entries per matchup)
+    const groups = matchups.reduce((acc, m) => {
+      const mid = m.matchup_id;
+      if (!acc[mid]) acc[mid] = [];
+      acc[mid].push(m);
+      return acc;
+    }, {});
+
+    // Auto-import weekly previews for current season/week
+    await importCurrentWeekPreviewsFromGithub(CURRENT_SEASON, week, leagueId);
+
+    // Render read-only previews
+    renderPreviews(week, groups, users, rosters);
+  } catch (err) {
+    const el = document.querySelector('#previewsWrap');
+    if (el) el.innerHTML = `<div class="muted">Error loading previews: ${err.message}</div>`;
+  }
+}
+
+
+
+(function setupPreviewsRoute(){
+  async function maybeLoadPreviews(){
+    if (location.hash.replace('#','') === 'previews') {
+      // ensure season is current Sleeper season
+      if (Number(CURRENT_SEASON) < 2025) {
+        const wrap = document.querySelector('#previewsWrap');
+        if (wrap) wrap.innerHTML = '<div class="muted">Previews are available for 2025+ Sleeper seasons only.</div>';
+        return;
+      }
+      await loadPreviewsPage();
+    }
+  }
+  window.addEventListener('hashchange', maybeLoadPreviews);
+  document.addEventListener('DOMContentLoaded', maybeLoadPreviews);
+  // also run once after boot
+  setTimeout(maybeLoadPreviews, 0);
+})();
 
 </script>
 
