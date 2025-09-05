@@ -194,9 +194,10 @@
     now = now || new Date();
     const day = now.getDay();   // 0=Sun, 1=Mon, ..., 4=Thu
     const h = now.getHours();
-    if (day === 4 && h >= 19) return true;            // Thu Night Football
-    if (day === 0 && h >= 9 && h <= 23) return true;  // Sunday slate incl. intl
-    if (day === 1 && h >= 19) return true;            // Mon Night Football
+    if (day === 4 && h >= 12) return true;            // Thu Night Football
+    if (day === 5 && h >= 12) return true;            // Fri early (intl games)
+    if (day === 0 && h >= 5 && h <= 23) return true;  // Sunday slate incl. intl
+    if (day === 1 && h >= 12) return true;            // Mon Night Football
     return false;
   }
 
