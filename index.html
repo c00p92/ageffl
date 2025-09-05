@@ -1888,5 +1888,57 @@ async function loadPreviewsPage() {
 
 </script>
 
+<script>
+/* Hide any "Load Matchups" button and auto-load matchups */
+(function () {
+  // 1) Hide the button (robust: tries common IDs and the visible text)
+  function hideLoadMatchupsButtons() {
+    const ids = ["loadMatchupsBtn", "loadMatchups", "btnLoadMatchups"];
+    ids.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { (el.closest(".btnrow") || el).style.display = "none"; }
+    });
+    // Fallback: hide any button whose text looks like "Load Matchups"
+    Array.from(document.querySelectorAll("button, a, .btn")).forEach(el => {
+      if ((el.textContent || "").trim().toLowerCase() === "load matchups") {
+        (el.closest(".btnrow") || el).style.display = "none";
+      }
+    });
+  }
+
+  // 2) Auto-load when the page shows the Matchups view (and once on load)
+  let loading = false;
+  async function ensureMatchupsLoaded() {
+    if (loading) return;
+    if (typeof window.loadMatchups !== "function") return; // wait until your app defines it
+    loading = true;
+    try { await window.loadMatchups(); } catch (e) { console.warn("loadMatchups failed:", e); }
+    finally { loading = false; }
+  }
+
+  function maybeAutoLoad() {
+    // If you're using hash-based routing, load when on #matchups
+    const route = (location.hash || "").replace("#", "");
+    if (!route || route === "matchups") { // default or explicit Matchups tab
+      ensureMatchupsLoaded();
+    }
+  }
+
+  // Run after app is ready
+  document.addEventListener("DOMContentLoaded", () => {
+    hideLoadMatchupsButtons();
+    // Defer a tick so your main scripts finish wiring up loadMatchups()
+    setTimeout(() => { hideLoadMatchupsButtons(); maybeAutoLoad(); }, 0);
+  });
+
+  // Also auto-load whenever the user navigates back to the Matchups view
+  window.addEventListener("hashchange", () => {
+    hideLoadMatchupsButtons();
+    maybeAutoLoad();
+  });
+})();
+</script>
+
+<script src="auto-refresh.js"></script>
 </body>
 </html>
