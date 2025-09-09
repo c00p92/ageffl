@@ -339,34 +339,54 @@ function destroyChart(ref) { if (ref && typeof ref.destroy === "function") ref.d
 function renderPFPAChart(rosters, userMap) {
   destroyChart(charts.scatter);
   const c = themeColors();
-  const data = rosters.map(r => ({
-    x: r?.settings?.fpts_against ?? 0,
-    y: r?.settings?.fpts ?? 0,
-    label: r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`
-  }));
+
+  const num = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const dataRaw = rosters.map(r => {
+    const pf  = num(r?.settings?.fpts) + num(r?.settings?.fpts_decimal) / 100;
+    const pa  = num(r?.settings?.fpts_against) + num(r?.settings?.fpts_against_decimal) / 100;
+    return {
+      x: pa,
+      y: pf,
+      label: r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`,
+      roster_id: r?.roster_id
+    };
+  });
+
+  // Filter out any non-finite values (Chart.js will skip these anyway)
+  const data = dataRaw.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
+
+  // Debug: see who got filtered out
+  if (data.length !== dataRaw.length) {
+    const missing = dataRaw.filter(p => !Number.isFinite(p.x) || !Number.isFinite(p.y));
+    console.warn("PF/PA scatter dropped rows (non-numeric PF/PA):", missing);
+  }
+
   charts.scatter = new Chart(el("#scatterPFPA"), {
     type: "scatter",
-    data: { datasets: [{ label:"PF vs PA", data, parsing:false, pointRadius:5, backgroundColor:c.accent }] },
+    data: { datasets: [{ label: "PF vs PA", data, parsing: false, pointRadius: 5, backgroundColor: c.accent }] },
     options: {
-      maintainAspectRatio:false,
+      maintainAspectRatio: false,
       scales: {
-        x: { title:{display:true, text:"Points Against (PA)", color:c.text}, grid:{color:c.grid}, ticks:{color:c.text} },
-        y: { title:{display:true, text:"Points For (PF)", color:c.text}, grid:{color:c.grid}, ticks:{color:c.text} }
+        x: { title: { display: true, text: "Points Against (PA)", color: c.text }, grid: { color: c.grid }, ticks: { color: c.text } },
+        y: { title: { display: true, text: "Points For (PF)",    color: c.text }, grid: { color: c.grid }, ticks: { color: c.text } }
       },
       plugins: {
         legend: { labels: { color: c.text } },
         tooltip: {
           callbacks: {
-            // Show the team name as the tooltip TITLE (top line)
             title: (items) => items?.[0]?.raw?.label ?? "",
-            // Show PF/PA as the tooltip LABEL (second line)
-            label: (ctx) => `PF ${ctx.parsed.y}, PA ${ctx.parsed.x}`,
+            label: (ctx) => `PF ${ctx.parsed.y.toFixed(2)}, PA ${ctx.parsed.x.toFixed(2)}`
           }
         }
-}
+      }
     }
   });
 }
+
 function renderPFBar(rosters, userMap) {
   destroyChart(charts.pf);
   const c = themeColors();
