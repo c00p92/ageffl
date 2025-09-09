@@ -353,7 +353,13 @@ function renderPFPAChart(rosters, userMap) {
         x: { title:{display:true, text:"Points Against (PA)", color:c.text}, grid:{color:c.grid}, ticks:{color:c.text} },
         y: { title:{display:true, text:"Points For (PF)", color:c.text}, grid:{color:c.grid}, ticks:{color:c.text} }
       },
-      plugins: { legend: { labels:{ color:c.text } } }
+      plugins: { legend: { labels:{ color:c.text } } },
+      tooltip: {
+        callbacks: {
+          // e.g. "Team Name: PF 1023, PA 987"
+          label: (ctx) => `${ctx.raw.label}: PF ${ctx.raw.y}, PA ${ctx.raw.x}`
+        }
+      }
     }
   });
 }
