@@ -365,14 +365,32 @@ function renderPFPAChart(rosters, userMap) {
     console.warn("PF/PA scatter dropped rows (non-numeric PF/PA):", missing);
   }
 
+  const xs = data.map(p => p.x), ys = data.map(p => p.y);
+  const xMin = Math.min(...xs), xMax = Math.max(...xs);
+  const yMin = Math.min(...ys), yMax = Math.max(...ys);
+
+  const padX = Math.max(5, (xMax - xMin) * 0.05); // 5% or 5 pts, whichever is larger
+  const padY = Math.max(5, (yMax - yMin) * 0.05);
+
   charts.scatter = new Chart(el("#scatterPFPA"), {
     type: "scatter",
     data: { datasets: [{ label: "PF vs PA", data, parsing: false, pointRadius: 5, backgroundColor: c.accent }] },
     options: {
       maintainAspectRatio: false,
-      scales: {
-        x: { title: { display: true, text: "Points Against (PA)", color: c.text }, grid: { color: c.grid }, ticks: { color: c.text } },
-        y: { title: { display: true, text: "Points For (PF)",    color: c.text }, grid: { color: c.grid }, ticks: { color: c.text } }
+      layout: { padding: { top: 12, right: 16, bottom: 12, left: 12 } }, // keep markers/labels off canvas edge
+          scales: {
+            x: {
+              title: { display: true, text: "Points Against (PA)", color: c.text },
+              grid: { color: c.grid }, ticks: { color: c.text },
+              min: xMin - padX, max: xMax + padX,
+              grace: "2%" // tiny extra breathing room
+            },
+            y: {
+              title: { display: true, text: "Points For (PF)", color: c.text },
+              grid: { color: c.grid }, ticks: { color: c.text },
+              min: yMin - padY, max: yMax + padY,
+              grace: "2%"
+            }
       },
       plugins: {
         legend: { labels: { color: c.text } },
