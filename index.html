@@ -74,6 +74,17 @@
     width:100%; min-height:140px; resize:vertical; border-radius:12px; border:1px solid var(--border); background:#0d0f16; color:var(--text); padding:10px 12px; line-height:1.35;
   }
   .btnrow { display:flex; gap:8px; flex-wrap:wrap; }
+
+  /* --- Matchup cards with win meter --- */
+.match-card { display:flex; flex-direction:column; gap:10px; }
+.match-head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.match-sub { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); }
+.winmeter { display:flex; height:18px; border-radius:999px; overflow:hidden; border:1px solid var(--border); background:#0d0f16; }
+.winmeter .left,
+.winmeter .right { display:flex; align-items:center; justify-content:center; font-weight:700; font-size:11px; color:#fff; }
+.winmeter .left { background: linear-gradient(90deg, var(--good), var(--accent-2)); }
+.winmeter .right { background: linear-gradient(90deg, #fe8aa0, var(--bad)); }
+
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 
@@ -818,9 +829,92 @@ async function loadMatchups() {
     // Keep the full 'rows' structure for charts, but only display the columns we want
     const tableRows = rows.map(r => [r[2], r[3], r[4], r[5], r[6]]);
 
-    matchupsWrap.innerHTML = tableRows.length
-      ? table(["Team A","Score A","Team B","Score B","Winner"], tableRows)
-      : `<div class="muted">No matchups found for week ${week}.</div>`;
+    // --- NEW: build matchup cards with win probabilities + projections ---
+    const { PowerScore, recentPFpg } = await computePower(leagueId, rosters, 3, week); // uses your existing model
+    const idxByRoster = new Map(); rosters.forEach((r,i)=> idxByRoster.set(String(r.roster_id), i));
+    const ownerOf = (rid) => rosters.find(x=>x.roster_id===rid)?.owner_id;
+    const nameOf  = (rid) => {
+      const r = rosters.find(x => x.roster_id === rid) || {};
+      return r?.settings?.team_name || userMap[r.owner_id] || `Roster ${rid}`;
+    };
+
+    const cards = Object.entries(groups).map(([mid, arr]) => {
+      // Handle byes
+      if (arr.length !== 2) {
+        const only = arr[0];
+        const owner = ownerOf(only.roster_id);
+        const name  = nameOf(only.roster_id);
+        const score = Number(only.points ?? 0);
+        return `
+          <div class="card match-card">
+            <div class="match-head">
+              <span class="namecell">${nameCellForOwner(owner, name, true)}</span>
+              <span class="muted">vs</span>
+              <span class="namecell muted">(bye)</span>
+            </div>
+            <div class="match-sub"><span>Score</span><span>${score} – 0</span></div>
+            <div class="winmeter" aria-label="Win chances">
+              <div class="left"  style="width:100%">100%</div>
+              <div class="right" style="width:0%">0%</div>
+            </div>
+          </div>
+        `;
+      }
+
+      // Two-team matchup
+      const [a,b] = arr;
+      const ia = idxByRoster.get(String(a.roster_id));
+      const ib = idxByRoster.get(String(b.roster_id));
+
+      const pwrA = ia != null ? PowerScore[ia] : 0.5;
+      const pwrB = ib != null ? PowerScore[ib] : 0.5;
+
+      // Quick projection: blend season PF/G with recent PF/G (you already use this in previews)
+      // proj ≈ 70% PF/G + 30% recent 3-game PF/G
+      const winsA = rosters[ia]?.settings?.wins ?? 0, lossesA = rosters[ia]?.settings?.losses ?? 0;
+      const winsB = rosters[ib]?.settings?.wins ?? 0, lossesB = rosters[ib]?.settings?.losses ?? 0;
+      const gpA = Math.max(1, winsA + lossesA), gpB = Math.max(1, winsB + lossesB);
+      const pfpgA = (rosters[ia]?.settings?.fpts ?? 0) / gpA;
+      const pfpgB = (rosters[ib]?.settings?.fpts ?? 0) / gpB;
+      const recA  = ia != null ? (recentPFpg[ia] || 0) : 0;
+      const recB  = ib != null ? (recentPFpg[ib] || 0) : 0;
+      const projA = Math.round(pfpgA*0.7 + recA*0.3);
+      const projB = Math.round(pfpgB*0.7 + recB*0.3);
+
+      // Win chance: logistic on PowerScore edge + a nudge from projection edge.
+      // Tuned for nice spread; tweak 6 and 0.04 to taste.
+      const edge = (pwrA - pwrB)*6 + (projA - projB)*0.04;
+      const pA = 1/(1+Math.exp(-edge));
+      const pB = 1 - pA;
+
+      const ownerA = ownerOf(a.roster_id), ownerB = ownerOf(b.roster_id);
+      const nameA  = nameOf(a.roster_id),  nameB  = nameOf(b.roster_id);
+      const scoreA = Number(a.points ?? 0), scoreB = Number(b.points ?? 0);
+
+      return `
+        <div class="card match-card" data-mid="${mid}">
+          <div class="match-head">
+            <span class="namecell">${nameCellForOwner(ownerA, nameA, true)}</span>
+            <span class="muted">vs</span>
+            <span class="namecell">${nameCellForOwner(ownerB, nameB, true)}</span>
+          </div>
+          <div class="match-sub">
+            <span>Score</span><span>${scoreA} – ${scoreB}</span>
+          </div>
+          <div class="match-sub">
+            <span>Proj (quick)</span><span>${projA} – ${projB}</span>
+          </div>
+          <div class="winmeter" aria-label="Win chances">
+            <div class="left"  style="width:${(pA*100).toFixed(0)}%">${(pA*100).toFixed(0)}%</div>
+            <div class="right" style="width:${(pB*100).toFixed(0)}%">${(pB*100).toFixed(0)}%</div>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    // Show cards (and keep rows for the Week Scores bar chart)
+    matchupsWrap.innerHTML = cards || `<div class="muted">No matchups found for week ${week}.</div>`;
+
 
     renderWeekBar(rows); // still uses the full rows with indices 2/3/4/5
 
