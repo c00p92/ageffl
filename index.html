@@ -2070,13 +2070,20 @@ async function loadPreviewsPage() {
     }
   }
 
+  
   // Run after app is ready
   document.addEventListener("DOMContentLoaded", () => {
     hideLoadMatchupsButtons();
     // Defer a tick so your main scripts finish wiring up loadMatchups()
-    setTimeout(() => { hideLoadMatchupsButtons(); maybeAutoLoad(); }, 0);
+    setTimeout(async () => {
+      hideLoadMatchupsButtons();
+      // Ensure the week is auto-detected BEFORE we auto-load matchups
+      if (typeof window.getCurrentWeek === "function") {
+        try { await window.getCurrentWeek(); } catch (e) { console.warn("getCurrentWeek failed:", e); }
+      }
+      maybeAutoLoad();
+    }, 0);
   });
-
   // Also auto-load whenever the user navigates back to the Matchups view
   window.addEventListener("hashchange", () => {
     hideLoadMatchupsButtons();
