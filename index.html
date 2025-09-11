@@ -75,16 +75,18 @@
   }
   .btnrow { display:flex; gap:8px; flex-wrap:wrap; }
 
-  /* --- Matchup cards with win meter --- */
-.match-card { display:flex; flex-direction:column; gap:10px; }
-.match-head { display:flex; justify-content:space-between; align-items:center; gap:10px; }
-.match-sub { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); }
-.winmeter { display:flex; height:18px; border-radius:999px; overflow:hidden; border:1px solid var(--border); background:#0d0f16; }
-.winmeter .left,
-.winmeter .right { display:flex; align-items:center; justify-content:center; font-weight:700; font-size:11px; color:#fff; }
-.winmeter .left { background: linear-gradient(90deg, var(--good), var(--accent-2)); }
-.winmeter .right { background: linear-gradient(90deg, #fe8aa0, var(--bad)); }
-
+/* --- Win Streaks card --- */
+.streak-card { display:flex; flex-direction:column; gap:10px; }
+.streak-card .row { display:flex; align-items:center; gap:12px; }
+.streak-card .left { display:flex; align-items:center; gap:10px; min-width:220px; }
+.streak-squares { display:flex; gap:4px; }
+.streak-squares .sq { width:12px; height:12px; border-radius:3px; background:var(--border); }
+.streak-squares .sq.win  { background:var(--good); }
+.streak-squares .sq.loss { background:var(--bad); }
+.streak-squares .sq.tie  { background:var(--muted); opacity:.9; }
+.streak-squares .sq.bye  { background:transparent; border:1px dashed var(--border); opacity:.6; }
+.streak-badge { margin-left:auto; font-size:12px; padding:2px 6px; border-radius:8px;
+  background:#0d0f16; color:var(--text); border:1px solid var(--border); }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 
@@ -165,6 +167,13 @@
       <h2>Matchups (selected week)</h2>
       <div id="matchupsWrap" class="muted">Enter a week and click “Load Matchups”.</div>
     </section>
+    <section>
+      <div class="card" id="streaksCard">
+        <h3>Recent Form (last 6)</h3>
+        <div id="streaksBody" class="streak-card"></div>
+      </div>
+    </section>
+    
 
     <section>
       <h2>Chart: PF vs PA (Scatter)</h2>
@@ -350,72 +359,24 @@ function destroyChart(ref) { if (ref && typeof ref.destroy === "function") ref.d
 function renderPFPAChart(rosters, userMap) {
   destroyChart(charts.scatter);
   const c = themeColors();
-
-  const num = (v) => {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : 0;
-  };
-
-  const dataRaw = rosters.map(r => {
-    const pf  = num(r?.settings?.fpts) + num(r?.settings?.fpts_decimal) / 100;
-    const pa  = num(r?.settings?.fpts_against) + num(r?.settings?.fpts_against_decimal) / 100;
-    return {
-      x: pa,
-      y: pf,
-      label: r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`,
-      roster_id: r?.roster_id
-    };
-  });
-
-  // Filter out any non-finite values (Chart.js will skip these anyway)
-  const data = dataRaw.filter(p => Number.isFinite(p.x) && Number.isFinite(p.y));
-
-  // Debug: see who got filtered out
-  if (data.length !== dataRaw.length) {
-    const missing = dataRaw.filter(p => !Number.isFinite(p.x) || !Number.isFinite(p.y));
-    console.warn("PF/PA scatter dropped rows (non-numeric PF/PA):", missing);
-  }
-
-  const xs = data.map(p => p.x), ys = data.map(p => p.y);
-  const xMin = Math.min(...xs), xMax = Math.max(...xs);
-  const yMin = Math.min(...ys), yMax = Math.max(...ys);
-
-  const padX = Math.max(5, (xMax - xMin) * 0.05); // 5% or 5 pts, whichever is larger
-  const padY = Math.max(5, (yMax - yMin) * 0.05);
-
+  const data = rosters.map(r => ({
+    x: r?.settings?.fpts_against ?? 0,
+    y: r?.settings?.fpts ?? 0,
+    label: r?.settings?.team_name || userMap[r.owner_id] || `Roster ${r.roster_id}`
+  }));
   charts.scatter = new Chart(el("#scatterPFPA"), {
     type: "scatter",
-    data: { datasets: [{ label: "PF vs PA", data, parsing: false, pointRadius: 5, backgroundColor: c.accent }] },
+    data: { datasets: [{ label:"PF vs PA", data, parsing:false, pointRadius:5, backgroundColor:c.accent }] },
     options: {
-      maintainAspectRatio: false,
-      layout: { padding: { top: 12, right: 16, bottom: 12, left: 12 } }, // keep markers/labels off canvas edge
-          scales: {
-            x: {
-              title: { display: true, text: "Points Against (PA)", color: c.text },
-              grid: { color: c.grid }, ticks: { color: c.text },
-              min: xMin - padX, max: xMax + padX,
-              grace: "2%" // tiny extra breathing room
-            },
-            y: {
-              title: { display: true, text: "Points For (PF)", color: c.text },
-              grid: { color: c.grid }, ticks: { color: c.text },
-              min: yMin - padY, max: yMax + padY,
-              grace: "2%"
-            }
+      maintainAspectRatio:false,
+      scales: {
+        x: { title:{display:true, text:"Points Against (PA)", color:c.text}, grid:{color:c.grid}, ticks:{color:c.text} },
+        y: { title:{display:true, text:"Points For (PF)", color:c.text}, grid:{color:c.grid}, ticks:{color:c.text} }
       },
-      plugins: {
-        legend: { labels: { color: c.text } },
-        tooltip: {
-          callbacks: {
-            title: (items) => items?.[0]?.raw?.label ?? "",
-            label: (ctx) => `PF ${ctx.parsed.y.toFixed(2)}, PA ${ctx.parsed.x.toFixed(2)}`
-          }
-        }
-      }
+      plugins: { legend: { labels:{ color:c.text } } }
     }
   });
 }
-
 function renderPFBar(rosters, userMap) {
   destroyChart(charts.pf);
   const c = themeColors();
@@ -490,8 +451,7 @@ async function computePower(leagueId, rosters, recentWindow = 3, currentWeek = N
       Object.values(groups).forEach(([a, b]) => {
         if (!a || !b) return;
         const ia = teamIndex.get(String(a.roster_id));
-        the_ib = teamIndex.get(String(b.roster_id));
-        const ib = the_ib;
+        const ib = teamIndex.get(String(b.roster_id));
         if (ia == null || ib == null) return;
         recentPFperTeam[ia] += (a.points ?? 0);
         recentPFperTeam[ib] += (b.points ?? 0);
@@ -816,7 +776,96 @@ async function loadMatchups() {
         const nameA = rosters.find(r=>r.roster_id===a.roster_id)?.settings?.team_name || userMap[ownerA] || `Roster ${a.roster_id}`;
         const nameB = rosters.find(r=>r.roster_id===b.roster_id)?.settings?.team_name || userMap[ownerB] || `Roster ${b.roster_id}`;
         const scoreA = a.points ?? 0, scoreB = b.points ?? 0;
-        const winner = scoreA === scoreB ? "Tie" : (scoreA > scoreB ? nameA : nameB);
+        const winner = scoreA === scoreB ? "Tie" : (scoreA > scoreB
+/* ---------- Win Streaks (recent form) ---------- */
+async function renderStreaksCard(leagueId, rosters, week, windowSize = 6) {
+  const wrap = document.querySelector("#streaksBody");
+  if (!wrap) return;
+
+  const from = Math.max(1, week - windowSize);
+  const weeks = Array.from({length: windowSize}, (_, i) => from + i).filter(w => w < week);
+  if (!weeks.length) { wrap.innerHTML = '<div class="muted">Not enough history yet.</div>'; return; }
+
+  const weeklyLists = await Promise.all(weeks.map(w => fetchJson(`/league/${leagueId}/matchups/${w}`)));
+  const byWeek = new Map();
+  weeklyLists.forEach((list, i) => {
+    const w = weeks[i];
+    const groups = {};
+    (list || []).forEach(m => {
+      if (!groups[m.matchup_id]) groups[m.matchup_id] = [];
+      groups[m.matchup_id].push(m);
+    });
+    byWeek.set(w, groups);
+  });
+
+  function symbolFor(rosterId, w) {
+    const groups = byWeek.get(w) || {};
+    for (const arr of Object.values(groups)) {
+      const me = arr.find(m => m.roster_id === rosterId);
+      if (me) {
+        if (arr.length !== 2) return '.'; // bye/unplayed
+        const opp = arr.find(m => m.roster_id !== rosterId);
+        const a = Number(me.points ?? NaN);
+        const b = Number(opp?.points ?? NaN);
+        if (!Number.isFinite(a) || !Number.isFinite(b)) return '.'; // pending
+        if (a === b) return 'T';
+        return a > b ? 'W' : 'L';
+      }
+    }
+    return '.'; // not found
+  }
+
+  function streakLabel(symbols) {
+    if (!symbols.length) return '-';
+    const last = symbols[symbols.length - 1];
+    if (last === '.' || last === 'T') return '-';
+    let n = 0;
+    for (let i = symbols.length - 1; i >= 0; i--) {
+      if (symbols[i] === last) n++; else break;
+    }
+    return `${last}${n}`; // e.g., W3 or L2
+  }
+
+  // Map roster -> rows
+  const userMap = {};
+  (cache.users || []).forEach(u => userMap[u.user_id] = u.display_name);
+
+  const rows = rosters.map(r => {
+    const owner = r.owner_id;
+    const name  = r?.settings?.team_name || userMap[owner] || `Roster ${r.roster_id}`;
+    const syms  = weeks.map(w => symbolFor(r.roster_id, w)); // oldest -> newest
+    const label = streakLabel(syms);
+    return { owner, roster_id: r.roster_id, name, syms, label };
+  });
+
+  // Sort by current streak strength then name
+  rows.sort((a, b) => {
+    const A = /^([WL])(\d+)$/.exec(a.label), B = /^([WL])(\d+)$/.exec(b.label);
+    const sa = A ? (A[1] === 'W' ? 1 : -1) * (+A[2]) : 0;
+    const sb = B ? (B[1] === 'W' ? 1 : -1) * (+B[2]) : 0;
+    return sb - sa || a.name.localeCompare(b.name);
+  });
+
+  wrap.innerHTML = rows.map(row => {
+    const nameHtml = (typeof nameCellForOwner === 'function')
+      ? nameCellForOwner(row.owner, row.name, true)
+      : `<span class="namecell"><span>${row.name}</span></span>`;
+
+    const squares = row.syms.map(s => {
+      const cls = s === 'W' ? 'win' : s === 'L' ? 'loss' : s === 'T' ? 'tie' : 'bye';
+      const title = s === 'W' ? 'Win' : s === 'L' ? 'Loss' : s === 'T' ? 'Tie' : 'No game';
+      return `<span class="sq ${cls}" title="${title}"></span>`;
+    }).join('');
+
+    return `
+      <div class="row">
+        <div class="left">${nameHtml}</div>
+        <div class="streak-squares" aria-label="Recent results (oldest → newest)">${squares}</div>
+        <div class="streak-badge">${row.label}</div>
+      </div>`;
+  }).join('');
+}
+ ? nameA : nameB);
         return [week, mid, nameCellForOwner(ownerA, nameA), scoreA, nameCellForOwner(ownerB, nameB), scoreB, esc(winner)];
       } else {
         const only = arr[0];
@@ -826,98 +875,13 @@ async function loadMatchups() {
       }
     }).sort((a,b)=> (b[3]+(b[5]||0)) - (a[3]+(a[5]||0)));
 
-    // Keep the full 'rows' structure for charts, but only display the columns we want
-    const tableRows = rows.map(r => [r[2], r[3], r[4], r[5], r[6]]);
+    matchupsWrap.innerHTML = rows.length
+      ? table(["Week","Matchup ID","Team A","Score A","Team B","Score B","Winner"], rows)
+      : `<div class="muted">No matchups found for week ${week}.</div>`;
 
-    // --- NEW: build matchup cards with win probabilities + projections ---
-    const { PowerScore, recentPFpg } = await computePower(leagueId, rosters, 3, week); // uses your existing model
-    const idxByRoster = new Map(); rosters.forEach((r,i)=> idxByRoster.set(String(r.roster_id), i));
-    const ownerOf = (rid) => rosters.find(x=>x.roster_id===rid)?.owner_id;
-    const nameOf  = (rid) => {
-      const r = rosters.find(x => x.roster_id === rid) || {};
-      return r?.settings?.team_name || userMap[r.owner_id] || `Roster ${rid}`;
-    };
+    renderWeekBar(rows);
 
-    const cards = Object.entries(groups).map(([mid, arr]) => {
-      // Handle byes
-      if (arr.length !== 2) {
-        const only = arr[0];
-        const owner = ownerOf(only.roster_id);
-        const name  = nameOf(only.roster_id);
-        const score = Number(only.points ?? 0);
-        return `
-          <div class="card match-card">
-            <div class="match-head">
-              <span class="namecell">${nameCellForOwner(owner, name, true)}</span>
-              <span class="muted">vs</span>
-              <span class="namecell muted">(bye)</span>
-            </div>
-            <div class="match-sub"><span>Score</span><span>${score} – 0</span></div>
-            <div class="winmeter" aria-label="Win chances">
-              <div class="left"  style="width:100%">100%</div>
-              <div class="right" style="width:0%">0%</div>
-            </div>
-          </div>
-        `;
-      }
-
-      // Two-team matchup
-      const [a,b] = arr;
-      const ia = idxByRoster.get(String(a.roster_id));
-      const ib = idxByRoster.get(String(b.roster_id));
-
-      const pwrA = ia != null ? PowerScore[ia] : 0.5;
-      const pwrB = ib != null ? PowerScore[ib] : 0.5;
-
-      // Quick projection: blend season PF/G with recent PF/G (you already use this in previews)
-      // proj ≈ 70% PF/G + 30% recent 3-game PF/G
-      const winsA = rosters[ia]?.settings?.wins ?? 0, lossesA = rosters[ia]?.settings?.losses ?? 0;
-      const winsB = rosters[ib]?.settings?.wins ?? 0, lossesB = rosters[ib]?.settings?.losses ?? 0;
-      const gpA = Math.max(1, winsA + lossesA), gpB = Math.max(1, winsB + lossesB);
-      const pfpgA = (rosters[ia]?.settings?.fpts ?? 0) / gpA;
-      const pfpgB = (rosters[ib]?.settings?.fpts ?? 0) / gpB;
-      const recA  = ia != null ? (recentPFpg[ia] || 0) : 0;
-      const recB  = ib != null ? (recentPFpg[ib] || 0) : 0;
-      const projA = Math.round(pfpgA*0.7 + recA*0.3);
-      const projB = Math.round(pfpgB*0.7 + recB*0.3);
-
-      // Win chance: logistic on PowerScore edge + a nudge from projection edge.
-      // Tuned for nice spread; tweak 6 and 0.04 to taste.
-      const edge = (pwrA - pwrB)*6 + (projA - projB)*0.04;
-      const pA = 1/(1+Math.exp(-edge));
-      const pB = 1 - pA;
-
-      const ownerA = ownerOf(a.roster_id), ownerB = ownerOf(b.roster_id);
-      const nameA  = nameOf(a.roster_id),  nameB  = nameOf(b.roster_id);
-      const scoreA = Number(a.points ?? 0), scoreB = Number(b.points ?? 0);
-
-      return `
-        <div class="card match-card" data-mid="${mid}">
-          <div class="match-head">
-            <span class="namecell">${nameCellForOwner(ownerA, nameA, true)}</span>
-            <span class="muted">vs</span>
-            <span class="namecell">${nameCellForOwner(ownerB, nameB, true)}</span>
-          </div>
-          <div class="match-sub">
-            <span>Score</span><span>${scoreA} – ${scoreB}</span>
-          </div>
-          <div class="match-sub">
-            <span>Proj (quick)</span><span>${projA} – ${projB}</span>
-          </div>
-          <div class="winmeter" aria-label="Win chances">
-            <div class="left"  style="width:${(pA*100).toFixed(0)}%">${(pA*100).toFixed(0)}%</div>
-            <div class="right" style="width:${(pB*100).toFixed(0)}%">${(pB*100).toFixed(0)}%</div>
-          </div>
-        </div>
-      `;
-    }).join("");
-
-    // Show cards (and keep rows for the Week Scores bar chart)
-    matchupsWrap.innerHTML = cards || `<div class="muted">No matchups found for week ${week}.</div>`;
-
-
-    renderWeekBar(rows); // still uses the full rows with indices 2/3/4/5
-
+    await renderStreaksCard(leagueId, rosters, week, 6);
 
     await importCurrentWeekPreviewsFromGithub(CURRENT_SEASON, week, leagueId);
     renderPreviews(week, groups, users, rosters);
