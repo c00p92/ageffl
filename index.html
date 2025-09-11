@@ -451,8 +451,7 @@ async function computePower(leagueId, rosters, recentWindow = 3, currentWeek = N
       Object.values(groups).forEach(([a, b]) => {
         if (!a || !b) return;
         const ia = teamIndex.get(String(a.roster_id));
-        the_ib = teamIndex.get(String(b.roster_id));
-        const ib = the_ib;
+        const ib = teamIndex.get(String(b.roster_id));
         if (ia == null || ib == null) return;
         recentPFperTeam[ia] += (a.points ?? 0);
         recentPFperTeam[ib] += (b.points ?? 0);
