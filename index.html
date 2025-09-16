@@ -469,7 +469,8 @@ function normalize(arr) {
   if (!isFinite(min) || !isFinite(max) || min === max) return arr.map(_ => 0.5);
   return arr.map(v => (v - min) / (max - min));
 }
-async function computePower(leagueId, rosters, recentWindow = 3, currentWeek = Number(weekInput.value || 1)) {
+async function computePower(leagueId, rosters, recentWindow = 3, currentWeek) {
+  const wk = Number.isFinite(Number(currentWeek)) ? Number(currentWeek) : 1;
   const teamIndex = new Map(); rosters.forEach((r, i) => teamIndex.set(String(r.roster_id), i));
 
   const gamesPlayed = rosters.map(r => (r?.settings?.wins ?? 0) + (r?.settings?.losses ?? 0));
@@ -481,17 +482,16 @@ async function computePower(leagueId, rosters, recentWindow = 3, currentWeek = N
   const movTotals = new Array(rosters.length).fill(0);
   const movWins = new Array(rosters.length).fill(0);
 
-  const startWeek = Math.max(1, currentWeek - recentWindow + 1);
-  for (let wk = startWeek; wk <= currentWeek; wk++) {
+  const startWeek = Math.max(1, wk - recentWindow + 1);
+  for (let w = startWeek; w <= wk /*currentWeek*/; w++) {
     try {
-      const m = await fetchJson(`/league/${leagueId}/matchups/${wk}`);
+      const m = await fetchJson(`/league/${leagueId}/matchups/${w}`);
       const groups = {};
       m.forEach(x => { const id = x.matchup_id ?? `solo-${x.roster_id}`; (groups[id] ||= []).push(x); });
       Object.values(groups).forEach(([a, b]) => {
         if (!a || !b) return;
         const ia = teamIndex.get(String(a.roster_id));
-        the_ib = teamIndex.get(String(b.roster_id));
-        const ib = the_ib;
+        const ib = teamIndex.get(String(b.roster_id));
         if (ia == null || ib == null) return;
         recentPFperTeam[ia] += (a.points ?? 0);
         recentPFperTeam[ib] += (b.points ?? 0);
@@ -522,7 +522,8 @@ async function computePower(leagueId, rosters, recentWindow = 3, currentWeek = N
   return { PowerScore, recentPFpg };
 }
 async function buildStandingsWithPower(leagueId, users, rosters) {
-  const { PowerScore } = await computePower(leagueId, rosters, 3, Number(weekInput.value || 1));
+  const currentWeek = Number(weekInput.value || 1);
+  const { PowerScore } = await computePower(leagueId, rosters, 3, currentWeek);
   const userMap = {}; users.forEach(u => userMap[u.user_id] = u.display_name);
 
   const rows = rosters
@@ -1561,8 +1562,8 @@ async function importESPN2021Public(espnLeagueId = ESPN_PUBLIC_2021_LEAGUE_ID) {
   try { await importESPN2021Public(); }
   catch (e) { console.warn("ESPN 2021 import failed (likely CORS):", e); showEspnSeedUI(); }
   finally {
-    getCurrentWeek();
-    loadCurrentLeague();
+    await getCurrentWeek();
+    await loadCurrentLeague();
     computeAllTime().then(renderAllTimeTable).catch(()=>{});
   }
 })();
