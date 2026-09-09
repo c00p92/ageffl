@@ -260,9 +260,13 @@ const LEAGUES = {
   2022: "783723162142658560",
   2023: "921453343510245376",
   2024: "1048189019835740160",
-  2025: "1220026837208399872" // current
+  2025: "1220026837208399872",
+  2026: "1340467071410016256" // current
 };
-const CURRENT_SEASON = 2025; // dashboard default
+const CURRENT_SEASON = 2026; // dashboard default
+/* Expose for auto-refresh.js (const declarations don't attach to window) */
+window.LEAGUES = LEAGUES;
+window.CURRENT_SEASON = CURRENT_SEASON;
 const BASE = "https://api.sleeper.app/v1";
 const el = (sel) => document.querySelector(sel);
 
@@ -461,6 +465,7 @@ async function getCurrentWeek() {
       el("#seasonNote").lastElementChild.textContent = `${state.season_type || "offseason"} • defaulting to Week 1`;
     }
   } catch { el("#seasonNote").lastElementChild.textContent = "Couldn’t detect week (set manually)."; }
+  return Number(weekInput.value) || null;
 }
 
 /* ---------- Power Rankings (current season) ---------- */
