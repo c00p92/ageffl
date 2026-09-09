@@ -1,0 +1,169 @@
+{
+  "_readme": [
+    "League lore for the weekly AI matchup previews. Everything the stats can't know goes here.",
+    "The weekly generator reads this file and works the details into each writeup.",
+    "Keys under 'managers' are exact Sleeper display_name values for the current season.",
+    "Fill in the empty fields as you go — a couple of lines per manager is plenty.",
+    "Anything in 'retired' is kept for callbacks to managers who left the league."
+  ],
+  "league": {
+    "name": "All Gold Everything",
+    "founded": "",
+    "trophyName": "",
+    "punishmentForLastPlace": "",
+    "houseJokes": [],
+    "notableHistory": []
+  },
+  "managers": {
+    "Coop92": {
+      "name": "Chris",
+      "nicknames": [],
+      "team2026": "McBride or Die",
+      "reputation": "",
+      "runningJokes": [],
+      "rivals": [],
+      "note": "League commissioner / site owner. Fine to be hardest on this team."
+    },
+    "aaaron002": {
+      "name": "Andre",
+      "nicknames": [],
+      "team2026": "The Dark Knight",
+      "reputation": "",
+      "runningJokes": [],
+      "rivals": [],
+      "note": "Name inferred from your Week 1 previews — correct if wrong."
+    },
+    "asturm92": {
+      "name": "",
+      "nicknames": [],
+      "team2026": "YOUR TEAM IS ASS",
+      "reputation": "",
+      "runningJokes": [],
+      "rivals": [],
+      "note": "One of these two is Tony (from your Week 1 previews) — fill in both."
+    },
+    "AverageTrashCan": {
+      "name": "Edwin",
+      "nicknames": [],
+      "team2026": "",
+      "reputation": "",
+      "runningJokes": [],
+      "rivals": [],
+      "note": "Name inferred from your Week 1 previews — correct if wrong."
+    },
+    "BoonerJamz03": {
+      "name": "",
+      "nicknames": [],
+      "team2026": "Dicker? Barely Know Her!",
+      "reputation": "",
+      "runningJokes": [],
+      "rivals": []
+    },
+    "CRed26": {
+      "name": "Corey",
+      "nicknames": [],
+      "team2026": "Team IR",
+      "reputation": "",
+      "runningJokes": [],
+      "rivals": [],
+      "note": "Name inferred from your Week 1 previews — correct if wrong."
+    },
+    "dwtaylor1055": {
+      "name": "Dan",
+      "nicknames": [],
+      "team2026": "Bubblegum Moonshot",
+      "reputation": "",
+      "runningJokes": [],
+      "rivals": [],
+      "note": "Name inferred from your Week 1 previews — correct if wrong."
+    },
+    "Jared338": {
+      "name": "",
+      "nicknames": [],
+      "team2026": "",
+      "reputation": "",
+      "runningJokes": [],
+      "rivals": []
+    },
+    "kevinamstutz": {
+      "name": "Kevin",
+      "nicknames": [],
+      "team2026": "honk honk trash can",
+      "reputation": "",
+      "runningJokes": [],
+      "rivals": []
+    },
+    "Micahross2321": {
+      "name": "Micah",
+      "nicknames": [],
+      "team2026": "Buck-ees",
+      "reputation": "",
+      "runningJokes": [],
+      "rivals": []
+    },
+    "86Cokeboys": {
+      "name": "",
+      "nicknames": [],
+      "team2026": "86 Cokeboys",
+      "reputation": "",
+      "runningJokes": [],
+      "rivals": [],
+      "note": "New to the league in 2026 — no history to draw on yet."
+    },
+    "zsparky11": {
+      "name": "",
+      "nicknames": [],
+      "team2026": "Love to ring her Bell",
+      "reputation": "",
+      "runningJokes": [],
+      "rivals": [],
+      "note": "One of these two is Tony (from your Week 1 previews) — fill in both. New to the league in 2026 — no history to draw on yet."
+    }
+  },
+  "retired": {
+    "BEEFCOPTER": {
+      "name": "",
+      "playedSeasons": [
+        2022,
+        2023,
+        2024,
+        2025
+      ],
+      "note": ""
+    },
+    "Toasted5": {
+      "name": "",
+      "playedSeasons": [
+        2022,
+        2023,
+        2024,
+        2025
+      ],
+      "note": ""
+    },
+    "SnOwMAn1486": {
+      "name": "",
+      "playedSeasons": [
+        2022,
+        2023
+      ],
+      "note": ""
+    },
+    "valtore101": {
+      "name": "",
+      "playedSeasons": [
+        2022,
+        2023
+      ],
+      "note": ""
+    },
+    "MrDeerHunter88": {
+      "name": "",
+      "playedSeasons": [
+        2024
+      ],
+      "note": ""
+    }
+  },
+  "doNotJokeAbout": []
+}
